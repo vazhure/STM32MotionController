@@ -1,5 +1,5 @@
 // 3DOF by Andrey Zhuravlev
-// Timer-based-stepping and PID controls added by Laith Wattar
+// Timer-based-stepping and PID controls added by Laith Wattar (https://github.com/lawattar)
 
 // V3 Changes:
 // - Motion Smoothing/Buffer removed
