@@ -1,5 +1,5 @@
 // 3DOF by Andrey Zhuravlev
-// Timer-based-stepping and PID controls added by Laith Wattar (https://github.com/lawattar)
+// Timer-based-stepping and PID controls added by Laith Wattar
 
 // V3 Changes:
 // - Motion Smoothing/Buffer removed
@@ -17,9 +17,11 @@
 // modified version from 2026-03-10 : struct STATE speedMMperSEC uint8_t -> uint16_t. Overal length of struct not changed because of alignment
 // modified version from 2026-03-19 : added enum PID_FLAGS, struct PID_STATE, updated command set enum COMMAND
 // stm32duino version
+// modified version from 2026-03-20 : Fixed Homing interruption logic (Reset/Disable now aborts homing state machine)
+// modified version from 2026-03-28 : Fixed setStepFrequency, startStepping. Canceling homeing if CMD_CLEAR ALARM appear
 
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// NOTE: MAKE SURE TO EDIT LINES 813-827 IF YOU CHANGE THE BALLSCREW LENGTH!
+// NOTE: MAKE SURE TO EDIT LINES FOR BALLSCREW LENGTH CONFIGURATION!
 // Also please double check:
 // -LED_PIN
 // -MM_PER_REV - distance in mm per revolution
@@ -34,9 +36,9 @@
 // http://dan.drown.org/stm32duino/package_STM32duino_index.json
 // https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json
 //
-// Download and isntall ST-Link Utility https://www.st.com/en/development-tools/stsw-link004.html
+// Download and install ST-Link Utility https://www.st.com/en/development-tools/stsw-link004.html
 
-//#define DEBUG
+// #define DEBUG
 // Board: STM32F103C8T6 5 pcs (master + 4 slave)
 
 #define I2C_SDA PB7
@@ -107,7 +109,7 @@ const T& clamp(const T& x, const T& a, const T& b) {
 #define SERIAL_TX_BUFFER_SIZE 512
 #define SERIAL_RX_BUFFER_SIZE 512
 
-#define LED_PIN PB2  // PC13  // * Check your board. Some have PB2 or another (label near LED).
+#define LED_PIN PC13 //PB2  // PC13  // * Check your board. Some have PB2 or another (label near LED).
 
 enum MODE : uint8_t { UNKNOWN,
                       CONNECTED,
@@ -312,7 +314,7 @@ void setup() {
 
   Serial.begin(SERIAL_BAUD_RATE);
   while (!Serial)
-    ;  // whait connected
+    ;  // wait connected
 
 #ifdef DEBUG
   // I2C Devices scan
@@ -351,8 +353,7 @@ const uint16_t syncTrajectoryPeriodMs = 10;
 int32_t syncTargets[MAX_LINEAR_ACTUATORS] = { 0 };
 bool syncTargetsPending = false;
 uint32_t syncLastDispatchMs = 0;
-//
-//bool pidDiagEnabled = false;
+
 const uint32_t PID_DIAG_INTERVAL_MS = 5000;
 uint32_t pidDiagLastMs = 0;
 
@@ -482,8 +483,6 @@ void ParseTextCommandLine() {
       QueuePidTextCommand(COMMAND::CMD_SET_PID_KI, (uint32_t)v);
     }
   } else if (EqualsIgnoreCase(key, "KD")) {
-    // KD accepts scaled integer (0..100 means 0.00..1.00) for SimHub sliders.
-    // If decimal text is provided, interpret it as direct KD and scale by 100.
     int32_t v = 0;
     if (strchr(rawValue, '.') != nullptr) {
       value = clamp(value, 0.0f, 50.0f);
@@ -523,8 +522,6 @@ void ParseTextCommandLine() {
       QueuePidTextCommand(COMMAND::CMD_SET_PID_BLEND, (uint32_t)v);
     }
   } else if (EqualsIgnoreCase(key, "PIDCFG")) {
-    // Accept both numeric and bool text for PID enable:
-    // PIDCFG=1,35 or PIDCFG=TRUE,35
     char* comma = strchr(eq + 1, ',');
     if (!comma) {
       return;
@@ -804,38 +801,34 @@ const uint8_t limiterPinNC = PA7;
 
 #define ANALOG_INPUT_MAX 4095
 
-volatile uint32_t accel = 25000;  // Acceleration limit in mm/s^2 (ie. 25000 = 2.5g, 12000 would be gentler --> adjust via desktop app)
-#define STEPS_CONTROL_DIST STEPS_PER_REVOLUTIONS / 4  // Distance in steps
+volatile uint32_t accel = 25000;  // Acceleration limit in mm/s^2
+#define STEPS_CONTROL_DIST STEPS_PER_REVOLUTIONS / 4
 
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 //ADJUST VALUES BELOW BASED ON YOUR BALLSCREW SPECIFICATIONS
 
 #ifdef SFU1610
-// If you have SFU1610 ballscrew, adjust below:
-const float MM_PER_REV = 10.0f;                                // distance in mm per revolution
-const float MAX_REVOLUTIONS = 9.0;                             // maximum revolutions for ballscrew (adjust depending on custom length, ie. 14 = 140mm)
-const int32_t STEPS_PER_REVOLUTIONS = 1000;                    // Steps per revolution, decreased from 2000 to 1000 to accomadate slower STM32s --> verify servo drive ratio is correct as well
-const int32_t SAFE_DIST_IN_STEPS = STEPS_PER_REVOLUTIONS / 4;  // Safe traveling distance in steps (do not adjust)
-#define MAX_SPEED_MM_SEC 400  // maximum speed mm/sec (keep at 400 and recommended to instead adjust via desktop app)
+const float MM_PER_REV = 10.0f;
+const float MAX_REVOLUTIONS = 9.0f;
+const int32_t STEPS_PER_REVOLUTIONS = 1000;
+const int32_t SAFE_DIST_IN_STEPS = STEPS_PER_REVOLUTIONS / 4;
+#define MAX_SPEED_MM_SEC 400
 #else
-// If you have SFU1605 ballscrew, adjust below:
-const float MM_PER_REV = 5.0f;                                 // distance in mm per revolution
-const float MAX_REVOLUTIONS = 17.5;                            // maximum revolutions for ballscrew (adjust depending on custom length, ie. 14 = 140mm)
-const int32_t STEPS_PER_REVOLUTIONS = 1000;                    // Steps per revolution --> verify servo drive ratio is correct as well
-const int32_t SAFE_DIST_IN_STEPS = STEPS_PER_REVOLUTIONS / 2;  // Safe traveling distance in steps (do not adjust)
-#define MAX_SPEED_MM_SEC 120  // maximum speed mm/sec (can adjust only up to 200 for 1605 ballscrews due to physical limitations)
+const float MM_PER_REV = 5.0f;
+const float MAX_REVOLUTIONS = 17.5f;
+const int32_t STEPS_PER_REVOLUTIONS = 1000;
+const int32_t SAFE_DIST_IN_STEPS = STEPS_PER_REVOLUTIONS / 2;
+#define MAX_SPEED_MM_SEC 120
 #endif
-//ADJUST VALUES ABOVE BASED ON YOUR PLATFORM SPECIFICATIONS
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-const int32_t RANGE = (int32_t)(MAX_REVOLUTIONS * STEPS_PER_REVOLUTIONS);  // Maximum traveling distance, steps
-const int32_t MIN_POS = SAFE_DIST_IN_STEPS;                                // minimal controlled position, steps
-const int32_t MAX_POS = RANGE - SAFE_DIST_IN_STEPS;                        // maximal controlled position, steps
+const int32_t RANGE = (int32_t)(MAX_REVOLUTIONS * STEPS_PER_REVOLUTIONS);
+const int32_t MIN_POS = SAFE_DIST_IN_STEPS;
+const int32_t MAX_POS = RANGE - SAFE_DIST_IN_STEPS;
 const uint8_t HOME_DIRECTION = HIGH;
 
-#define MIN_PULSE_DELAY 5  // Minimal pulse interval, us, may be limited by hardware.
-
-#define MIN_REVERSE_DELAY 6  // Delay between DIR and STEP signal on direction change, us
+#define MIN_PULSE_DELAY 5
+#define MIN_REVERSE_DELAY 6
 
 #define MMPERSEC2DELAY(mmps) 1000000 / (STEPS_PER_REVOLUTIONS * mmps / MM_PER_REV)
 
@@ -851,9 +844,9 @@ const uint8_t HOME_DIRECTION = HIGH;
 #define MIN(a, b) (a < b ? a : b)
 #endif
 
-const int HOMEING_PULSE_DELAY = MAX(MIN_PULSE_DELAY, (int)MMPERSEC2DELAY(MIN_SPEED_MM_SEC) - MIN_PULSE_DELAY);     // us
-const int FAST_PULSE_DELAY = MAX(MIN_PULSE_DELAY, (int)MMPERSEC2DELAY(DEFAULT_SPEED_MM_SEC) - MIN_PULSE_DELAY);    // us
-const int SLOW_PULSE_DELAY = MAX(FAST_PULSE_DELAY * 2, (int)MMPERSEC2DELAY(SLOW_SPEED_MM_SEC) - MIN_PULSE_DELAY);  // us
+const int HOMEING_PULSE_DELAY = MAX(MIN_PULSE_DELAY, (int)MMPERSEC2DELAY(MIN_SPEED_MM_SEC) - MIN_PULSE_DELAY);
+const int FAST_PULSE_DELAY = MAX(MIN_PULSE_DELAY, (int)MMPERSEC2DELAY(DEFAULT_SPEED_MM_SEC) - MIN_PULSE_DELAY);
+const int SLOW_PULSE_DELAY = MAX(FAST_PULSE_DELAY * 2, (int)MMPERSEC2DELAY(SLOW_SPEED_MM_SEC) - MIN_PULSE_DELAY);
 
 volatile int iFastPulseDelay = FAST_PULSE_DELAY;
 volatile int iSlowPulseDelay = SLOW_PULSE_DELAY;
@@ -870,9 +863,9 @@ volatile bool LimitChanged = true;
 // ========== TIMER-BASED STEPPING VARIABLES ==========
 HardwareTimer stepTimer(2);  // Timer 2 for Roger Clark core
 volatile bool steppingEnabled = false;
-volatile bool stepPinState = false;         // Track STEP pin state for pulse generation
-volatile uint32_t currentFrequency = 1000;  // Current step frequency in Hz
-volatile uint32_t accelStepCount = 0;       // Steps taken for acceleration tracking
+volatile bool stepPinState = false;
+volatile uint32_t currentFrequency = 1000;
+volatile uint32_t accelStepCount = 0;
 // ====================================================
 
 // ========== PID CONTROL VARIABLES ==========
@@ -880,7 +873,7 @@ struct PIDController {
   float Kp = 1.5f;
   float Ki = 0.0f;
   float Kd = 0.02f;
-  float Ks = 0.50f;  // Derivative smoothing ratio (0..1)
+  float Ks = 0.50f;
 
   float integralLimit = 400.0f;
   float maxFreq = 40000.0f;
@@ -895,7 +888,7 @@ struct PIDController {
 
 volatile int32_t maxAccelSteps = (int32_t)(25000.0f * STEPS_PER_REVOLUTIONS / MM_PER_REV);
 volatile bool pidControlEnabled = false;
-float pidBlend = 0.35f;  // 0..1 scales PID output intensity
+float pidBlend = 0.35f;
 float limitedFrequencyHz = 0.0f;
 uint32_t frequencyLimiterLastMs = 0;
 
@@ -993,33 +986,27 @@ inline uint32_t delayToFreq(uint32_t delayUs) {
 
 // ========== TIMER ISR - GENERATES STEP PULSES ==========
 void timerISR() {
-  // Check if we should stop stepping
   if (!steppingEnabled || currentPos == targetPos) {
     steppingEnabled = false;
-    GPIOA->regs->BSRR = (1 << (STEP_PIN_BIT + 16));  // Ensure STEP is LOW
+    GPIOA->regs->BSRR = (1 << (STEP_PIN_BIT + 16));
     stepPinState = false;
     return;
   }
 
-  // Check limit switch - stop if on limit and moving towards it
   if (limitSwitchState == HIGH && currentDir == HOME_DIRECTION) {
     steppingEnabled = false;
-    GPIOA->regs->BSRR = (1 << (STEP_PIN_BIT + 16));  // Ensure STEP is LOW
+    GPIOA->regs->BSRR = (1 << (STEP_PIN_BIT + 16));
     stepPinState = false;
     return;
   }
 
-  // Alternate between HIGH and LOW to create proper pulse width
   if (!stepPinState) {
-    // Rising edge - set STEP HIGH
     GPIOA->regs->BSRR = (1 << STEP_PIN_BIT);
     stepPinState = true;
   } else {
-    // Falling edge - set STEP LOW and update position
     GPIOA->regs->BSRR = (1 << (STEP_PIN_BIT + 16));
     stepPinState = false;
 
-    // Update position on falling edge (one complete step)
     if (currentDir == HIGH) {
       currentPos++;
     } else {
@@ -1032,8 +1019,12 @@ void timerISR() {
 // ========== INITIALIZE TIMER ==========
 void initStepTimer() {
   stepTimer.pause();
-  stepTimer.setPrescaleFactor(1);  // 72MHz / 1 = 72MHz timer clock
-  stepTimer.setOverflow(36000);    // Initial value, will be updated dynamically
+  // Prescaler 1 => Timer Clock = 72MHz
+  stepTimer.setPrescaleFactor(1);
+
+  // Set a safe default overflow (approx 1100Hz timer freq -> 550Hz step freq)
+  stepTimer.setOverflow(65535);
+
   stepTimer.setMode(TIMER_CH1, TIMER_OUTPUT_COMPARE);
   stepTimer.attachInterrupt(TIMER_CH1, timerISR);
   stepTimer.refresh();
@@ -1042,18 +1033,28 @@ void initStepTimer() {
 
 // ========== SET STEP FREQUENCY ==========
 void setStepFrequency(uint32_t freqHz) {
-  if (freqHz < 100) freqHz = 100;      // Minimum 100 Hz
-  if (freqHz > 40000) freqHz = 40000;  // Maximum 40 kHz
+  // FIX: Clamp frequency to safe limits for 16-bit timer @ 72MHz
+  // Min freq: 72MHz / 65535 / 2 ≈ 550 Hz.
+  // Setting limit to 600 Hz for safety margin.
+  if (freqHz < 600) freqHz = 600;
+  if (freqHz > 40000) freqHz = 40000;
 
   currentFrequency = freqHz;
 
-  // Timer must run at 2x frequency since we alternate HIGH/LOW
-  // Each step requires 2 ISR calls: one for HIGH, one for LOW
+  // Timer frequency must be double the step frequency for toggle logic
   uint32_t timerFreq = freqHz * 2;
 
-  // Calculate overflow value: 72,000,000 / (frequency * 2)
+  // Calculate period in clock ticks
+  // Timer Clock is 72MHz (72MHz / 1 Prescaler)
   uint32_t overflow = 72000000UL / timerFreq;
-  stepTimer.setOverflow(overflow);
+
+  // FIX: ARR register must be (period - 1) because counter starts at 0
+  // Check for underflow just in case
+  if (overflow > 1) {
+    stepTimer.setOverflow(overflow - 1);
+  } else {
+    stepTimer.setOverflow(1);  // Minimum safe value
+  }
 }
 
 // ========== START STEPPING ==========
@@ -1083,43 +1084,14 @@ void startStepping(uint8_t dir) {
 // ========== STOP STEPPING ==========
 void stopStepping() {
   steppingEnabled = false;
-  GPIOA->regs->BSRR = (1 << (STEP_PIN_BIT + 16));  // Ensure STEP is LOW when stopped
+  GPIOA->regs->BSRR = (1 << (STEP_PIN_BIT + 16));
   stepPinState = false;
   limitedFrequencyHz = 0.0f;
   frequencyLimiterLastMs = millis();
 }
 
-// ========== LEGACY BLOCKING STEP (UNUSED, KEPT FOR REFERENCE) ==========
-// This function is no longer called - replaced by timer ISR
-/*
-inline void Step(uint8_t dir, int delay) {
-  if (limitSwitchState == HIGH && dir == HOME_DIRECTION)
-    return;  // ON LIMIT SWITCH
-
-  digitalWrite(dirPin, dir);
-  if (_oldDir != dir) {
-    last_step_time = 0;
-    delayMicroseconds(MIN_REVERSE_DELAY);
-    _oldDir = dir;
-  }
-
-  double delta = MIN(MAX((micros() - last_step_time), 1), iSlowPulseDelay);
-
-  double acc_pulse = pulse - (double)accel * delta / 1000000.0;
-  pulse = acc_pulse > delay ? acc_pulse : delay;
-
-  last_step_time = micros();
-  digitalWrite(stepPin, HIGH);
-  delayMicroseconds(MIN_PULSE_DELAY);
-  digitalWrite(stepPin, LOW);
-  delayMicroseconds((uint32_t)pulse);
-  currentPos += dir == HIGH ? 1 : -1;
-}
-*/
-
 // Limit switch event
 void OnLimitSwitch() {
-  // Refresh immediately so timerISR() sees the latest switch state.
   limitSwitchState = digitalRead(limiterPinNO);
   LimitChanged = true;
 }
@@ -1139,8 +1111,7 @@ void receiveEvent(int size) {
           break;
         }
         if (mode != MODE::HOMEING) {
-          // Immediate homing entry: stop any active stepping before mode switch.
-          stopStepping();
+          stopStepping();  // Ensure clear state
           setStepFrequency(delayToFreq(HOMEING_PULSE_DELAY));
           accelStepCount = 0;
 
@@ -1173,8 +1144,15 @@ void receiveEvent(int size) {
       case COMMAND::CMD_CLEAR_ALARM:
       case COMMAND::CMD_ENABLE:
         {
+          // FIX: Stop any motion immediately
+          stopStepping();
           LimitChanged = true;
           resetPID();
+
+          // FIX: If we were homing, we are no longer homed
+          if (mode == MODE::HOMEING) {
+            bHomed = false;
+          }
 
           if (bHomed)
             mode = MODE::READY;
@@ -1183,16 +1161,19 @@ void receiveEvent(int size) {
         }
         break;
       case COMMAND::CMD_DISABLE:
+        // FIX: If homing, reset homed flag
+        if (mode == MODE::HOMEING) bHomed = false;
+
         mode = MODE::DISABLED;
         stopStepping();
         break;
       case COMMAND::CMD_SET_SPEED:
         iFastPulseDelayMM = data = clamp((int)data, MIN_SPEED_MM_SEC, MAX_SPEED_MM_SEC);
-        iFastPulseDelay = MAX(MIN_PULSE_DELAY, (int)MMPERSEC2DELAY(data) - MIN_PULSE_DELAY);  // us
+        iFastPulseDelay = MAX(MIN_PULSE_DELAY, (int)MMPERSEC2DELAY(data) - MIN_PULSE_DELAY);
         pid.maxFreq = (float)mmPerSecToFreq(data);
         break;
       case COMMAND::CMD_SET_SLOW_SPEED:
-        iSlowPulseDelay = MAX(iFastPulseDelay, (int)MMPERSEC2DELAY(data) - MIN_PULSE_DELAY);  // us
+        iSlowPulseDelay = MAX(iFastPulseDelay, (int)MMPERSEC2DELAY(data) - MIN_PULSE_DELAY);
         break;
       case COMMAND::CMD_SET_ACCEL:
         accel = data;
@@ -1258,12 +1239,10 @@ void setup() {
 
   attachInterrupt(limiterPinNO, OnLimitSwitch, CHANGE);
 
-  // Initialize timer-based stepping
   initStepTimer();
   resetPID();
 
   Wire.begin(SLAVE_ADDR);
-  // Wire.setClock(400000);  // Reverted due to connectivity issues: use default I2C clock
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
 
@@ -1287,68 +1266,69 @@ void loop() {
         {
           stopStepping();
 
-          // Move away from switch - set target correctly based on direction
           if (HOME_DIRECTION == HIGH) {
-            targetPos = currentPos - SAFE_DIST_IN_STEPS;  // Moving negative (away from switch)
+            targetPos = currentPos - SAFE_DIST_IN_STEPS;
           } else {
-            targetPos = currentPos + SAFE_DIST_IN_STEPS;  // Moving positive (away from switch)
+            targetPos = currentPos + SAFE_DIST_IN_STEPS;
           }
 
           uint32_t homeFreq = delayToFreq(HOMEING_PULSE_DELAY);
           setStepFrequency(homeFreq);
           startStepping(!HOME_DIRECTION);
 
-          // Wait based on direction
           if (HOME_DIRECTION == HIGH) {
             while (currentPos > targetPos) {
-              if (mode == MODE::ALARM || !steppingEnabled) {
+              // FIX: Check if mode changed (e.g. CMD_DISABLE)
+              if (mode != MODE::HOMEING || !steppingEnabled) {
                 break;
               }
               delay(1);
-            }
-            if (mode == MODE::ALARM || currentPos > targetPos) {
-              mode = MODE::ALARM;
-              bHomed = false;
-              stopStepping();
-              break;
             }
           } else {
             while (currentPos < targetPos) {
-              if (mode == MODE::ALARM || !steppingEnabled) {
+              if (mode != MODE::HOMEING || !steppingEnabled) {
                 break;
               }
               delay(1);
             }
-            if (mode == MODE::ALARM || currentPos < targetPos) {
-              mode = MODE::ALARM;
-              bHomed = false;
-              stopStepping();
-              break;
-            }
+          }
+
+          // FIX: Abort if mode changed
+          if (mode != MODE::HOMEING) {
+            stopStepping();
+            break;
+          }
+
+          if (mode == MODE::ALARM) {
+            stopStepping();
+            break;
           }
 
           stopStepping();
-
-          // Re-read limit switch state after backing off
           limitSwitchState = digitalRead(limiterPinNO);
 
           currentPos = MAX_POS;
           targetPos = (MIN_POS + MAX_POS) / 2;
 
-          // Move to center at homing speed
           setStepFrequency(homeFreq);
-          uint8_t centerDir = (targetPos > currentPos) ? HIGH : LOW;  // Calculate correct direction
+          uint8_t centerDir = (targetPos > currentPos) ? HIGH : LOW;
           startStepping(centerDir);
 
           while (targetPos != currentPos) {
-            if (mode == MODE::ALARM || !steppingEnabled) {
+            // FIX: Check if mode changed
+            if (mode != MODE::HOMEING || !steppingEnabled) {
               break;
             }
             delay(1);
           }
-          if (mode == MODE::ALARM || targetPos != currentPos) {
-            mode = MODE::ALARM;
-            bHomed = false;
+
+          // FIX: Abort if mode changed
+          if (mode != MODE::HOMEING) {
+            stopStepping();
+            break;
+          }
+
+          if (mode == MODE::ALARM) {
             stopStepping();
             break;
           }
@@ -1370,8 +1350,12 @@ void loop() {
           break;
         }
 
-        // Continue homing - only start stepping if not already stepping
         if (!steppingEnabled) {
+          if (mode != MODE::HOMEING) {
+            stopStepping();
+            break;
+          }
+
           uint32_t homeFreq = delayToFreq(HOMEING_PULSE_DELAY);
           setStepFrequency(homeFreq);
           startStepping(HOME_DIRECTION);
