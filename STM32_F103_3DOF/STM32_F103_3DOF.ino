@@ -29,10 +29,10 @@
  *      brew install open-ocd stlink-tools     (macOS)
  *
  * 4. Hardware Wiring Notes:
- *    - STEP+, DIR+ connect to AXIS(N)_STEP / AXIS(N)_DIR pins.
+ *    - STEP+, DIR+ connect to AXIS(N)_STEP / AXIS(N)_DIR pins. Use 220 Ohm resistors / current limit
  *    - STEP-, DIR- connect to GND.
  *    - Limit switches: Use Normally Closed (NC) switches between AXIS(N)_LIMIT and GND.
- *      (Logic: HIGH = idle, LOW = triggered via internal pull-up)
+ *      (Logic: LOW = idle, HIGH = triggered via internal pull-up)
  * =============================================================================
  */
 
@@ -59,7 +59,7 @@
 #define AXIS3_STEP PA6
 #define AXIS3_DIR PA7
 #define AXIS3_LIMIT PB12
-#define LED_PIN PC13
+#define LED_PIN PB2 //PC13
 
 // Limit Pins -> GND, NC (use normally closed switches)
 // STEP-, DIR- -> GND
@@ -301,8 +301,12 @@ void loop() {
       memcpy(&pccmd, rxBuffer, PCCMD_SIZE);
       dataReceived = true;
       rxOffset = 0;
+      break;
     }
+    
+    if (rxOffset >= sizeof(rxBuffer) - 1) rxOffset = 0;
   }
+
   if (dataReceived) {
     dataReceived = false;
     digitalWrite(LED_PIN, LOW);

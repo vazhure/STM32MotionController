@@ -174,8 +174,8 @@ void DMAStepper_SetMaxSpeed(uint8_t axisIdx, uint32_t speedMM) {
 
 bool DMAStepper_CheckLimit(uint8_t axisIdx) {
   if (axisIdx >= NUM_AXES) return false;
-  // Assumes NC limit switch with internal pull-up: HIGH = idle, LOW = triggered
-  return (digitalRead(axisConfig[axisIdx].limitPin) == LOW);
+  // Assumes NC limit switch with internal pull-up: LOW = idle, HIGH = triggered
+  return (digitalRead(axisConfig[axisIdx].limitPin) == HIGH);
 }
 
 // =============================================================================
