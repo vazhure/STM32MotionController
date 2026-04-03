@@ -59,7 +59,7 @@
 #define AXIS3_STEP PA6
 #define AXIS3_DIR PA7
 #define AXIS3_LIMIT PB12
-#define LED_PIN PB2 //PC13
+#define LED_PIN PB2  //PC13
 
 // Limit Pins -> GND, NC (use normally closed switches)
 // STEP-, DIR- -> GND
@@ -101,6 +101,17 @@ struct PCCMD {
   int32_t data[4];
 } __attribute__((packed));
 
+
+// FOR SimHub
+struct PCCMD_SH {
+  uint8_t header = 0;
+  uint8_t len;  // len
+  COMMAND cmd;
+  uint8_t reserved;
+  uint16_t data[4];
+  uint16_t data2[4];  // EMPTY
+} __attribute__((packed));
+
 struct STATE {
   uint8_t mode;
   uint8_t flags;
@@ -119,6 +130,8 @@ struct PID_STATE {
 } __attribute__((packed));
 
 PCCMD pccmd;
+PCCMD_SH& pccmd_sh = *(PCCMD_SH*)&pccmd;
+
 volatile bool dataReceived = false;
 uint8_t rxBuffer[32];
 int rxOffset = 0;
@@ -163,6 +176,17 @@ void processCommand() {
       for (int i = 0; i < NUM_AXES; i++) {
         AxisState* ax = DMAStepper_GetAxis(i);
         if (ax && ax->homed && ax->mode == MODE_READY) DMAStepper_SetTarget(i, pccmd.data[i]);
+      }
+      break;
+    case CMD_MOVE_SH:
+      for (int i = 0; i < NUM_AXES; i++) {
+        uint16_t val = pccmd_sh.data[i];
+        val = (val >> 8) | (val << 8);
+        AxisState* ax = DMAStepper_GetAxis(i);
+        if (ax && ax->homed && ax->mode == MODE_READY) {
+          int32_t target = map(val, 0, 65535, ax[i].minPos, ax[i].maxPos);
+          DMAStepper_SetTarget(i, target);
+        }
       }
       break;
     case CMD_SET_SPEED:
@@ -303,7 +327,7 @@ void loop() {
       rxOffset = 0;
       break;
     }
-    
+
     if (rxOffset >= sizeof(rxBuffer) - 1) rxOffset = 0;
   }
 
