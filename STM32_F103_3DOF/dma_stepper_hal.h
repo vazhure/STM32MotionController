@@ -1,3 +1,7 @@
+// 3DOF by Andrey Zhuravlev
+// v.azhure@gmail.com
+// Discord: https://discord.gg/ynHCkrsmMA
+
 #ifndef DMA_STEPPER_HAL_H
 #define DMA_STEPPER_HAL_H
 #include <Arduino.h>
