@@ -1,3 +1,7 @@
+// 3DOF by Andrey Zhuravlev
+// v.azhure@gmail.com
+// Discord: https://discord.gg/ynHCkrsmMA
+
 #include "dma_stepper_hal.h"
 #include <HardwareTimer.h>
 #include <libmaple/gpio.h>
