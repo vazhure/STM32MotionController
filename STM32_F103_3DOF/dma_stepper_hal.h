@@ -1,62 +1,59 @@
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
 // Discord: https://discord.gg/ynHCkrsmMA
-
 #ifndef DMA_STEPPER_HAL_H
 #define DMA_STEPPER_HAL_H
 #include <Arduino.h>
 
 // =============================================================================
-// 🛠️ НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ (меняйте значения только здесь)
+// 🛠️ USER CONFIGURATION (Modify only these values)
 // =============================================================================
-// Механика
-#define MM_PER_REV 10.0f
-#define STEPS_PER_REV 1000
-#define MAX_REVOLUTIONS 9.0f
+// Mechanical parameters
+#define MM_PER_REV 10.0f      // Millimeters per motor revolution
+#define STEPS_PER_REV 1000    // Microsteps per revolution (e.g., 200 steps * 5x microstepping)
+#define MAX_REVOLUTIONS 9.0f  // Maximum allowed revolutions before software limit
 
 // =============================================================================
-// МАКРОСЫ ПРЕОБРАЗОВАНИЯ ЕДИНИЦ
+// UNIT CONVERSION MACROS
 // =============================================================================
-// Преобразование скорости (мм/с) в частоту шагов (Гц)
-// Формула: частота = (мм/с) × (шагов/оборот) / (мм/оборот)
-// Пример: 10 мм/с × 1000 шагов/об / 10 мм/об = 1000 Гц
+// Convert speed (mm/s) to step frequency (Hz)
+// Formula: freq = (mm/s) × (steps/rev) / (mm/rev)
+// Example: 10 mm/s × 1000 steps/rev / 10 mm/rev = 1000 Hz
 #define MMPERSECTOFREQHZ(mmpers) ((uint32_t)((float)(mmpers) * (float)STEPS_PER_REV / (float)MM_PER_REV))
-
-// Обратное преобразование: частота (Гц) → скорость (мм/с)
+// Inverse conversion: frequency (Hz) → speed (mm/s)
 #define FREQHZTOMMPERSEC(freqhz) ((float)(freqhz) * (float)MM_PER_REV / (float)STEPS_PER_REV)
-
+// Safe frequency conversion with clamping
 #define MMPERSECTOFREQHZ_SAFE(mmpers) constrain(MMPERSECTOFREQHZ(mmpers), MIN_FREQUENCY_HZ, MAX_FREQUENCY_HZ)
 
-// Ограничения частоты (Гц)
-#define MAX_FREQUENCY_HZ 200000
-#define SAFE_FREQUENCY_HZ 100000
+// Frequency limits (Hz)
+#define MAX_FREQUENCY_HZ 200000   // Absolute maximum step frequency
+#define SAFE_FREQUENCY_HZ 100000  // Recommended safe operating limit
 #define DEFAULT_FREQUENCY_HZ 50000
-#define MIN_FREQUENCY_HZ 50
+#define MIN_FREQUENCY_HZ 50  // Minimum reliable step frequency
 
-// Скорости специальных режимов (Гц)
-#define HOMING_FREQUENCY_HZ MMPERSECTOFREQHZ_SAFE(15)   // Скорость поиска концевика
-#define PARKING_FREQUENCY_HZ MMPERSECTOFREQHZ_SAFE(15)  // Скорость парковки
+// Special mode speeds (Hz)
+#define HOMING_FREQUENCY_HZ MMPERSECTOFREQHZ_SAFE(15)   // Homing search speed
+#define PARKING_FREQUENCY_HZ MMPERSECTOFREQHZ_SAFE(15)  // Parking movement speed
 
-// Таймауты калибровки (мс)
-#define HOMING_SEEK_TIMEOUT_MS 30000    // Макс. время поиска концевика
-#define HOMING_RETRACT_DURATION_MS 300  // Время отката от сработавшего концевика
-#define HOMING_CENTER_TIMEOUT_MS 30000  // Макс. время движения в центр
+// Homing timeouts (ms)
+#define HOMING_SEEK_TIMEOUT_MS 30000    // Max time to find limit switch
+#define HOMING_RETRACT_DURATION_MS 300  // Time to back off after hitting limit
+#define HOMING_CENTER_TIMEOUT_MS 30000  // Max time to move to center position
+#define MAX_ACCEL 80000                 // Max acceleration (steps/s²)
 
-#define MAX_ACCEL 80000
+// Travel multipliers (relative to MAX_REVOLUTIONS * STEPS_PER_REV)
+#define HOMING_TRAVEL_LIMIT_MULT 1.5f    // Target position during seek (safety margin)
+#define HOMING_OVERFLOW_LIMIT_MULT 1.4f  // Emergency overflow limit
 
-// Множители хода (относительно MAX_REVOLUTIONS * STEPS_PER_REV)
-#define HOMING_TRAVEL_LIMIT_MULT 1.5f    // Целевая позиция при поиске (запас)
-#define HOMING_OVERFLOW_LIMIT_MULT 1.4f  // Аварийный предел переполнения
-
-// Допуски и задержки
-#define POSITION_TOLERANCE 50         // Допуск достижения позиции (шаги)
-#define POSITION_DEADZONE 2           // Мёртвая зона остановки (шаги)
-#define ACCEL_RAMP_DISTANCE 50       // Дистанция плавного разгона/торможения (шаги)
-#define DIRECTION_CHANGE_DELAY_US 10  // Задержка при смене направления (мкс)
-#define HOMING_CENTER_TOLERANCE 100     // Допуск при движении в центр (шаги) - больше чем POSITION_TOLERANCE
+// Tolerances and delays
+#define POSITION_TOLERANCE 50         // Position reached tolerance (steps)
+#define POSITION_DEADZONE 2           // Deadzone to stop movement (steps)
+#define ACCEL_RAMP_DISTANCE 50        // Distance for smooth accel/decel ramp (steps)
+#define DIRECTION_CHANGE_DELAY_US 10  // Delay when changing direction (µs)
+#define HOMING_CENTER_TOLERANCE 100   // Tolerance for centering (steps) - larger than POSITION_TOLERANCE
 
 // =============================================================================
-// СИСТЕМНЫЕ КОНСТАНТЫ (не менять)
+// SYSTEM CONSTANTS (Do not modify)
 // =============================================================================
 #define MM_PER_STEP (MM_PER_REV / STEPS_PER_REV)
 #define MAX_SPEED_MM_SEC (int)(MAX_FREQUENCY_HZ * MM_PER_STEP)
@@ -65,7 +62,7 @@
 #define NUM_AXES 4
 
 // =============================================================================
-// СТРУКТУРЫ ДАННЫХ
+// DATA STRUCTURES
 // =============================================================================
 typedef struct {
   uint8_t stepPin;
@@ -83,13 +80,11 @@ typedef struct {
   volatile bool stepping;
   volatile bool homed;
   volatile uint8_t mode;
-
   uint32_t maxFreqHz;
   uint32_t maxSpeedMM;
   float limitedFreq;
   uint32_t accelLastTime;
   uint32_t maxAccel;
-
   float Kp, Ki, Kd, Ks;
   float integral;
   float prevError;
@@ -100,21 +95,26 @@ typedef struct {
   float pidBlend;
 } AxisState;
 
-enum AxisMode { MODE_UNKNOWN = 0,
-                MODE_CONNECTED = 1,
-                MODE_DISABLED = 2,
-                MODE_HOMING = 3,
-                MODE_PARKING = 4,
-                MODE_READY = 5,
-                MODE_ALARM = 6 };
-enum HomingSubState { H_IDLE = 0,
-                      H_SEEKING,
-                      H_RETRACT,
-                      H_MOVING_CENTER,
-                      H_DONE };
+enum AxisMode {
+  MODE_UNKNOWN = 0,
+  MODE_CONNECTED = 1,
+  MODE_DISABLED = 2,
+  MODE_HOMING = 3,
+  MODE_PARKING = 4,
+  MODE_READY = 5,
+  MODE_ALARM = 6
+};
+
+enum HomingSubState {
+  H_IDLE = 0,
+  H_SEEKING,
+  H_RETRACT,
+  H_MOVING_CENTER,
+  H_DONE
+};
 
 // =============================================================================
-// API
+// API FUNCTIONS
 // =============================================================================
 void DMAStepper_Init(void);
 void DMAStepper_InitAxis(uint8_t axisIdx, uint8_t stepPin, uint8_t dirPin, uint8_t limitPin);
@@ -133,5 +133,4 @@ void DMAStepper_SetPIDBlend(uint8_t axisIdx, float blend);
 bool DMAStepper_CheckLimit(uint8_t axisIdx);
 void DMAStepper_ClearAlarm(void);
 void DMAStepper_Process(void);
-
 #endif

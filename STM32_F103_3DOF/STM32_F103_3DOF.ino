@@ -1,15 +1,51 @@
+/*
+ * =============================================================================
+ * 🛠️ COMPILATION & SETUP INSTRUCTIONS
+ * =============================================================================
+ * 1. Arduino IDE Configuration:
+ *    - Open Preferences -> Additional Boards Manager URLs:
+ *      https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json
+ *    - Board Manager -> Install "STM32 MCU based boards" by STMicroelectronics (v2.5.0+).
+ *    - Select Board: "Generic STM32F1 series"
+ *    - Board part number: "Blue Pill F103C8" (or F103CB)
+ *    - Upload method: "STLink" (recommended) or "Serial"
+ *    - CPU Speed: "72 MHz (Normal)"
+ *    - Note: This code uses legacy libmaple headers. If compilation fails, 
+ *      switch Board variant to "STM32F1xx/Maple (Roger's core)" or replace 
+ *      #include <libmaple/gpio.h> with #include <Arduino.h> in dma_stepper_hal.cpp.
+ *
+ * 2. Required Libraries:
+ *    - No external libraries required. Uses built-in STM32 Arduino core.
+ *
+ * 3. ST-Link Flashing Utilities & Drivers:
+ *    - Windows GUI: STM32CubeProgrammer
+ *      https://www.st.com/en/development-tools/stm32cubeprog.html
+ *    - Legacy ST-Link Utility:
+ *      https://www.st.com/en/development-tools/stsw-link004.html
+ *    - USB Driver (Windows libusb/winusb fix): Zadig
+ *      https://zadig.akeo.ie/
+ *    - Linux/macOS: Install openocd or stlink-tools
+ *      sudo apt install openocd stlink-tools  (Debian/Ubuntu)
+ *      brew install open-ocd stlink-tools     (macOS)
+ *
+ * 4. Hardware Wiring Notes:
+ *    - STEP+, DIR+ connect to AXIS(N)_STEP / AXIS(N)_DIR pins. Use 220 Ohm resistors / current limit
+ *    - STEP-, DIR- connect to GND.
+ *    - Limit switches: Use Normally Closed (NC) switches between AXIS(N)_LIMIT and GND.
+ *      (Logic: HIGH = idle, LOW = triggered via internal pull-up)
+ * =============================================================================
+ */
+
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
 // Discord: https://discord.gg/ynHCkrsmMA
-
 #include "dma_stepper_hal.h"
 #include <EEPROM.h>
 #include <string.h>
-
 #define SERIAL_BAUD_RATE 115200
 
 // =============================================================================
-// ПИНЫ (AXIS3_LIMIT перенесён на PB12 для избежания конфликта с USB PA11)
+// PIN ASSIGNMENTS (AXIS3_LIMIT moved to PB12 to avoid USB conflict on PA11)
 // =============================================================================
 #define AXIS0_STEP PA0
 #define AXIS0_DIR PA1
@@ -25,6 +61,9 @@
 #define AXIS3_LIMIT PB12
 #define LED_PIN PC13
 
+// Limit Pins -> GND, NC (use normally closed switches)
+// STEP-, DIR- -> GND
+// STEP+, DIR+ -> AXIS(N)_STEP, AXIS(N)_DIR
 #define CMD_ID 0
 #define PCCMD_SIZE 20
 #define STATE_SIZE 20
@@ -61,6 +100,7 @@ struct PCCMD {
   uint8_t reserved;
   int32_t data[4];
 } __attribute__((packed));
+
 struct STATE {
   uint8_t mode;
   uint8_t flags;
@@ -70,6 +110,7 @@ struct STATE {
   int32_t min;
   int32_t max;
 } __attribute__((packed));
+
 struct PID_STATE {
   uint8_t version;
   uint8_t flags;
@@ -91,6 +132,7 @@ void savePidToEEPROM() {
   uint8_t* p = (uint8_t*)&pidGlobal;
   for (int i = 0; i < PID_STATE_LEN; i++) EEPROM.update(PID_EEPROM_ADDR + 1 + i, p[i]);
 }
+
 bool loadPidFromEEPROM() {
   if (EEPROM.read(PID_EEPROM_ADDR) != PID_EEPROM_MAGIC) return false;
   uint8_t* p = (uint8_t*)&pidGlobal;
@@ -108,6 +150,7 @@ void sendAllStates() {
     Serial.write((uint8_t*)&s, STATE_SIZE);
   }
 }
+
 void sendPIDState() {
   Serial.write(255);
   Serial.write(PID_STATE_SIZE);
@@ -146,26 +189,22 @@ void processCommand() {
       break;
     case CMD_CLEAR_ALARM: DMAStepper_ClearAlarm(); break;
     case CMD_HOME:
-      // Запуск калибровки
+      // Start homing sequence
       for (int i = 0; i < NUM_AXES; i++) {
         AxisState* ax = DMAStepper_GetAxis(i);
         if (!ax) continue;
-
         if (ax->homed && ax->mode != MODE_ALARM) {
-          continue;
+          continue;  // Skip if already homed and not in alarm
         }
-
         ax->mode = MODE_HOMING;
-        ax->homed = false;  // Сбрасываем флаг калибровки
-
-        // Подготовка к движению
+        ax->homed = false;  // Reset homed flag
+        // Prepare for movement
         DMAStepper_StopAxis(i);
-        DMAStepper_SetFrequency(i, 1000);  // Медленная скорость для поиска (10 мм/с)
-        DMAStepper_SetPosition(i, 0);      // Сброс счетчика для корректного отсчета
-        // Цель за пределами максимума, чтобы гарантированно упереться в концевик
+        DMAStepper_SetFrequency(i, 1000);  // Slow speed for limit search (10 mm/s)
+        DMAStepper_SetPosition(i, 0);      // Reset position counter for accurate tracking
+        // Target beyond max range to guarantee hitting the limit switch
         DMAStepper_SetTarget(i, (int32_t)(MAX_REVOLUTIONS * STEPS_PER_REV * 1.5));
-
-        DMAStepper_StartAxis(i, true);  // Старт в сторону концевика
+        DMAStepper_StartAxis(i, true);  // Start moving towards limit switch
       }
       break;
     case CMD_PARK:
@@ -214,18 +253,15 @@ void processCommand() {
     case CMD_STORE_PID:
       savePidToEEPROM();
       break;
-
     case CMD_RESTORE_PID:
       if (loadPidFromEEPROM()) {
         bool pidWasEnabled = (pidGlobal.flags & 0x01) != 0;
-
-        // Останавливаем PID на всех осях, применяем новые коэффициенты
+        // Stop PID on all axes, apply new coefficients
         for (int i = 0; i < NUM_AXES; i++) {
-          DMAStepper_SetPIDEnable(i, false);  // Остановка PID
+          DMAStepper_SetPIDEnable(i, false);  // Stop PID
           DMAStepper_SetPID(i, pidGlobal.Kp, pidGlobal.Ki, pidGlobal.Kd, pidGlobal.Ks);
           DMAStepper_SetPIDBlend(i, (float)pidGlobal.blend / 100.0f);
-
-          // Если PID был включён глобально, восстанавливаем работу (сброс интеграла произойдёт внутри HAL)
+          // If PID was globally enabled, restore operation (integral reset happens inside HAL)
           if (pidWasEnabled) {
             DMAStepper_SetPIDEnable(i, true);
           }
@@ -241,21 +277,17 @@ void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   while (!Serial)
     ;
-
   DMAStepper_Init();
   DMAStepper_InitAxis(0, AXIS0_STEP, AXIS0_DIR, AXIS0_LIMIT);
   DMAStepper_InitAxis(1, AXIS1_STEP, AXIS1_DIR, AXIS1_LIMIT);
   DMAStepper_InitAxis(2, AXIS2_STEP, AXIS2_DIR, AXIS2_LIMIT);
   DMAStepper_InitAxis(3, AXIS3_STEP, AXIS3_DIR, AXIS3_LIMIT);
-
   for (int i = 0; i < NUM_AXES; i++) {
     DMAStepper_SetPID(i, pidGlobal.Kp, pidGlobal.Ki, pidGlobal.Kd, pidGlobal.Ks);
     DMAStepper_SetPIDBlend(i, (float)pidGlobal.blend / 100.0f);
-
     bool pidEnabled = (pidGlobal.flags & 0x01) != 0;
     DMAStepper_SetPIDEnable(i, pidEnabled);
   }
-
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
 }
@@ -277,6 +309,5 @@ void loop() {
     processCommand();
     digitalWrite(LED_PIN, HIGH);
   }
-
   DMAStepper_Process();
 }
