@@ -29,7 +29,7 @@
  *      brew install open-ocd stlink-tools     (macOS)
  *
  * 4. Hardware Wiring Notes:
- *    - STEP+, DIR+ connect to AXIS(N)_STEP / AXIS(N)_DIR pins. Use 220 Ohm resistors / current limit
+ *    - STEP+, DIR+ connect to AXIS(N)_STEP / AXIS(N)_DIR pins.
  *    - STEP-, DIR- connect to GND.
  *    - Limit switches: Use Normally Closed (NC) switches between AXIS(N)_LIMIT and GND.
  *      (Logic: HIGH = idle, LOW = triggered via internal pull-up)
