@@ -98,7 +98,7 @@ struct PCCMD {
   uint8_t len;
   COMMAND cmd;
   uint8_t reserved;
-  int32_t data[4];
+  int32_t data[NUM_AXES];
 } __attribute__((packed));
 
 
@@ -108,8 +108,8 @@ struct PCCMD_SH {
   uint8_t len;  // len
   COMMAND cmd;
   uint8_t reserved;
-  uint16_t data[4];
-  uint16_t data2[4];  // EMPTY
+  uint16_t data[NUM_AXES];
+  uint16_t data2[NUM_AXES];  // EMPTY
 } __attribute__((packed));
 
 struct STATE {
@@ -132,9 +132,12 @@ struct PID_STATE {
 PCCMD pccmd;
 PCCMD_SH& pccmd_sh = *(PCCMD_SH*)&pccmd;
 
+const int RAW_DATA_LEN = sizeof(PCCMD);
+
 volatile bool dataReceived = false;
-uint8_t rxBuffer[32];
+uint8_t rxBuffer[RAW_DATA_LEN * 2];
 int rxOffset = 0;
+
 PID_STATE pidGlobal = { .version = 1, .flags = 0, .blend = 35, .Kp = 15.0f, .Ki = 0.0f, .Kd = 0.02f, .Ks = 0.30f };
 const int PID_STATE_LEN = sizeof(PID_STATE);
 #define PID_EEPROM_MAGIC 0x5A
@@ -316,20 +319,32 @@ void setup() {
   digitalWrite(LED_PIN, HIGH);
 }
 
-void loop() {
-  while (Serial.available()) {
-    uint8_t b = Serial.read();
-    if (rxOffset == 0 && b != CMD_ID) continue;
-    rxBuffer[rxOffset++] = b;
-    if (rxOffset >= PCCMD_SIZE) {
-      memcpy(&pccmd, rxBuffer, PCCMD_SIZE);
-      dataReceived = true;
-      rxOffset = 0;
-      break;
+inline void serialEvent() {
+  int data_cnt = min(Serial.available(), PCCMD_SIZE);
+  if (data_cnt < 2)
+    return;
+  for (int t = 0; t < data_cnt; ++t) {
+    int byte = Serial.read();
+    if (rxOffset > 0) {
+      rxBuffer[rxOffset++] = byte;
+      if (rxOffset == PCCMD_SIZE) {
+        memcpy(&pccmd, rxBuffer, PCCMD_SIZE);
+        dataReceived = true;
+        rxOffset = 0;
+      }
+    } else {
+      if (byte == CMD_ID) {
+        if (Serial.peek() == PCCMD_SIZE) {
+          rxBuffer[rxOffset++] = CMD_ID;
+        }
+      }
     }
-
-    if (rxOffset >= sizeof(rxBuffer) - 1) rxOffset = 0;
   }
+}
+
+
+void loop() {
+  serialEvent();
 
   if (dataReceived) {
     dataReceived = false;
