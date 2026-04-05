@@ -49,16 +49,16 @@
 // =============================================================================
 #define AXIS0_STEP PA0
 #define AXIS0_DIR PA1
-#define AXIS0_LIMIT PA8
+#define AXIS0_LIMIT PB12 //PA8
 #define AXIS1_STEP PA2
 #define AXIS1_DIR PA3
-#define AXIS1_LIMIT PA9
+#define AXIS1_LIMIT PA8 //PA9
 #define AXIS2_STEP PA4
 #define AXIS2_DIR PA5
-#define AXIS2_LIMIT PA10
+#define AXIS2_LIMIT PA9 // PA10
 #define AXIS3_STEP PA6
 #define AXIS3_DIR PA7
-#define AXIS3_LIMIT PB12
+#define AXIS3_LIMIT PA10// PB12
 #define LED_PIN PB2  //PC13
 
 // Limit Pins -> GND, NC (use normally closed switches)
