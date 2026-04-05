@@ -1,6 +1,9 @@
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
 // Discord: https://discord.gg/ynHCkrsmMA
+
+// 2026-04-05 Limit switches debouncing added
+
 #include "dma_stepper_hal.h"
 #include <HardwareTimer.h>
 #include <libmaple/gpio.h>
@@ -18,20 +21,34 @@ static const gpio_dev* dirPorts[NUM_AXES];
 static uint8_t dirBits[NUM_AXES];
 static volatile bool stepState[NUM_AXES] = { false };
 static volatile uint32_t axisAccum[NUM_AXES] = { 0 };
-// Homing/Parking states (saved speed REMOVED to conserve memory)
+
+// Homing/Parking states
 static HomingSubState axisHomeState[NUM_AXES] = { H_IDLE };
 static uint32_t axisHomeTime[NUM_AXES] = { 0 };
+
+// Debounce counters for limit switches (16-bit shift register per axis)
+// Value 1 = released, 32768 = confirmed triggered
+static uint16_t limitDebounce[NUM_AXES] = { 1, 1, 1, 1 };
+
 #define ISR_BASE_FREQ 100000UL  // 100 kHz base interrupt frequency → supports up to 500 mm/s
 
 // =============================================================================
 // FAST GPIO & ISR (Interrupt Service Routine)
 // =============================================================================
+
+// Fast pin read using libmaple direct register access (much faster than digitalRead)
+inline bool fastReadPin(uint8_t pin) {
+  return gpio_read_bit(PIN_MAP[pin].gpio_device, PIN_MAP[pin].gpio_bit);
+}
+
 inline void stepPinHigh(uint8_t i) {
   stepPorts[i]->regs->BSRR = (1 << stepBits[i]);
 }
+
 inline void stepPinLow(uint8_t i) {
   stepPorts[i]->regs->BRR = (1 << stepBits[i]);
 }
+
 inline void setDirection(uint8_t i, bool fwd) {
   if (fwd) dirPorts[i]->regs->BSRR = (1 << dirBits[i]);
   else dirPorts[i]->regs->BRR = (1 << dirBits[i]);
@@ -94,14 +111,17 @@ void DMAStepper_Init(void) {
     axisState[i].pidEnabled = false;
     axisState[i].pidBlend = 0.35f;
     stepState[i] = false;
+    limitDebounce[i] = 1;  // Initialize debounce counter
   }
 }
 
 void DMAStepper_InitAxis(uint8_t axisIdx, uint8_t stepPin, uint8_t dirPin, uint8_t limitPin) {
   if (axisIdx >= NUM_AXES) return;
+
   axisConfig[axisIdx].stepPin = stepPin;
   axisConfig[axisIdx].dirPin = dirPin;
   axisConfig[axisIdx].limitPin = limitPin;
+
   stepPorts[axisIdx] = PIN_MAP[stepPin].gpio_device;
   stepBits[axisIdx] = PIN_MAP[stepPin].gpio_bit;
   dirPorts[axisIdx] = PIN_MAP[dirPin].gpio_device;
@@ -110,8 +130,11 @@ void DMAStepper_InitAxis(uint8_t axisIdx, uint8_t stepPin, uint8_t dirPin, uint8
   pinMode(stepPin, OUTPUT);
   pinMode(dirPin, OUTPUT);
   pinMode(limitPin, INPUT_PULLUP);
+
   digitalWrite(stepPin, LOW);
   digitalWrite(dirPin, LOW);
+
+  limitDebounce[axisIdx] = 1;  // Reset debounce counter for this axis
   axisState[axisIdx].mode = MODE_CONNECTED;
 }
 
@@ -122,7 +145,7 @@ void DMAStepper_SetFrequency(uint8_t axisIdx, uint32_t freqHz) {
   if (axisIdx >= NUM_AXES) return;
   // Limit USER frequency (full steps/s)
   // Actual switching frequency will be ×2 due to step pulse generation
-  freqHz = constrain(freqHz, MIN_FREQUENCY_HZ, MAX_FREQUENCY_HZ / 2);  // <-- Divide MAX by 2
+  freqHz = constrain(freqHz, MIN_FREQUENCY_HZ, MAX_FREQUENCY_HZ / 2);
   axisState[axisIdx].frequency = freqHz * 2;
 }
 
@@ -157,9 +180,11 @@ void DMAStepper_SetTarget(uint8_t axisIdx, int32_t target) {
 int32_t DMAStepper_GetPosition(uint8_t axisIdx) {
   return (axisIdx < NUM_AXES) ? axisState[axisIdx].currentPosition : 0;
 }
+
 void DMAStepper_SetPosition(uint8_t axisIdx, int32_t pos) {
   if (axisIdx < NUM_AXES) axisState[axisIdx].currentPosition = pos;
 }
+
 AxisState* DMAStepper_GetAxis(uint8_t axisIdx) {
   return (axisIdx < NUM_AXES) ? &axisState[axisIdx] : nullptr;
 }
@@ -172,10 +197,30 @@ void DMAStepper_SetMaxSpeed(uint8_t axisIdx, uint32_t speedMM) {
   axisState[axisIdx].pidMaxFreq = (float)axisState[axisIdx].maxFreqHz;
 }
 
+// =============================================================================
+// LIMIT SWITCH CHECK WITH DEBOUNCE
+// =============================================================================
 bool DMAStepper_CheckLimit(uint8_t axisIdx) {
   if (axisIdx >= NUM_AXES) return false;
-  // Assumes NC limit switch with internal pull-up: LOW = idle, HIGH = triggered
-  return (digitalRead(axisConfig[axisIdx].limitPin) == HIGH);
+
+  // Read raw pin state using fast GPIO (NC switch: LOW = idle, HIGH = triggered)
+  bool rawState = fastReadPin(axisConfig[axisIdx].limitPin);
+
+  // Exponential debounce filter using 16-bit shift register
+  if (rawState) {
+    // Signal active: shift left, cap at 32768 (confirmed triggered)
+    if (limitDebounce[axisIdx] < 32768) {
+      limitDebounce[axisIdx] <<= 1;
+    }
+  } else {
+    // Signal inactive: shift right, floor at 1 (confirmed released)
+    if (limitDebounce[axisIdx] > 1) {
+      limitDebounce[axisIdx] >>= 1;
+    }
+  }
+
+  // Return confirmed state: only true after 15 consecutive HIGH readings (~15ms at 1kHz)
+  return (limitDebounce[axisIdx] == 32768);
 }
 
 // =============================================================================
@@ -206,6 +251,7 @@ static float computePID(AxisState* ax, uint32_t currentTime) {
   float dt = (float)(currentTime - ax->accelLastTime) / 1000.0f;
   if (dt <= 0.0f || dt > 0.5f) dt = 0.001f;
   ax->accelLastTime = currentTime;
+
   float error = (float)(ax->targetPosition - ax->currentPosition);
   float proportional = ax->Kp * error;
 
@@ -213,13 +259,14 @@ static float computePID(AxisState* ax, uint32_t currentTime) {
     ax->integral += error * dt;
     ax->integral = constrain(ax->integral, -400.0f, 400.0f);
   } else {
-    ax->integral *= 0.9f;
-  }  // Anti-windup decay when far from target
+    ax->integral *= 0.9f;  // Anti-windup decay when far from target
+  }
 
   float integralTerm = ax->Ki * ax->integral;
   float derivative = (error - ax->prevError) / dt;
   ax->derivativeFilter = ax->Ks * ax->derivativeFilter + (1.0f - ax->Ks) * derivative;
   ax->prevError = error;
+
   float output = proportional + integralTerm + ax->Kd * ax->derivativeFilter;
   float freq = fabs(output);
 
@@ -232,10 +279,13 @@ static uint32_t applyAccelLimit(AxisState* ax, uint32_t desiredFreq) {
   uint32_t dt = now - ax->accelLastTime;
   if (dt == 0) dt = 1;
   ax->accelLastTime = now;
+
   float maxDelta = (float)ax->maxAccel * dt / 1000.0f;
   float delta = (float)desiredFreq - ax->limitedFreq;
+
   if (fabs(delta) > maxDelta) ax->limitedFreq += (delta > 0) ? maxDelta : -maxDelta;
   else ax->limitedFreq = (float)desiredFreq;
+
   return (uint32_t)constrain((int32_t)ax->limitedFreq, MIN_FREQUENCY_HZ, (int32_t)ax->maxFreqHz);
 }
 
@@ -246,6 +296,7 @@ void DMAStepper_ClearAlarm(void) {
   DMAStepper_StopAll();
   for (int i = 0; i < NUM_AXES; i++) {
     axisHomeState[i] = H_IDLE;
+    limitDebounce[i] = 1;  // Reset debounce counter on alarm clear
     AxisState* ax = &axisState[i];
     ax->mode = ax->homed ? MODE_READY : MODE_CONNECTED;
     ax->limitedFreq = 0;
@@ -256,13 +307,14 @@ void DMAStepper_ClearAlarm(void) {
 void DMAStepper_Process(void) {
   uint32_t now = millis();
   int32_t maxRange = (int32_t)(MAX_REVOLUTIONS * STEPS_PER_REV);
+
   for (int i = 0; i < NUM_AXES; i++) {
     AxisState* ax = &axisState[i];
 
     switch (ax->mode) {
-      // =====================================================================
+      // =================================================================
       // HOMING MODE (Hardcoded speed: HOMING_FREQUENCY_HZ)
-      // =====================================================================
+      // =================================================================
       case MODE_HOMING:
         DMAStepper_SetFrequency(i, HOMING_FREQUENCY_HZ);
 
@@ -291,6 +343,7 @@ void DMAStepper_Process(void) {
               DMAStepper_StartAxis(i, true);
             }
             break;
+
           case H_RETRACT:
             if (now - axisHomeTime[i] > HOMING_RETRACT_DURATION_MS) {
               DMAStepper_StopAxis(i);
@@ -302,6 +355,7 @@ void DMAStepper_Process(void) {
               DMAStepper_StartAxis(i, false);
             }
             break;
+
           case H_MOVING_CENTER:
             if (abs(ax->currentPosition - ax->targetPosition) <= HOMING_CENTER_TOLERANCE) {
               DMAStepper_StopAxis(i);
@@ -323,9 +377,9 @@ void DMAStepper_Process(void) {
         }
         break;
 
-      // =====================================================================
+      // =================================================================
       // PARKING MODE (Hardcoded speed: PARKING_FREQUENCY_HZ)
-      // =====================================================================
+      // =================================================================
       case MODE_PARKING:
         DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
         DMAStepper_SetTarget(i, ax->minPos);
@@ -340,9 +394,9 @@ void DMAStepper_Process(void) {
         }
         break;
 
-      // =====================================================================
+      // =================================================================
       // READY MODE (Uses ax->maxFreqHz from CMD_SET_SPEED)
-      // =====================================================================
+      // =================================================================
       case MODE_READY:
         {
           int32_t error = ax->targetPosition - ax->currentPosition;
@@ -387,9 +441,9 @@ void DMAStepper_Process(void) {
         }
         break;
 
-      // =====================================================================
+      // =================================================================
       // OTHER MODES (Stop movement)
-      // =====================================================================
+      // =================================================================
       case MODE_CONNECTED:
       case MODE_DISABLED:
       case MODE_ALARM:

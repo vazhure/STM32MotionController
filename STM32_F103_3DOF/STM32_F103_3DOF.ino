@@ -232,14 +232,6 @@ void processCommand() {
           continue;  // Skip if already homed and not in alarm
         }
         ax->mode = MODE_HOMING;
-        ax->homed = false;  // Reset homed flag
-        // Prepare for movement
-        DMAStepper_StopAxis(i);
-        DMAStepper_SetFrequency(i, 1000);  // Slow speed for limit search (10 mm/s)
-        DMAStepper_SetPosition(i, 0);      // Reset position counter for accurate tracking
-        // Target beyond max range to guarantee hitting the limit switch
-        DMAStepper_SetTarget(i, (int32_t)(MAX_REVOLUTIONS * STEPS_PER_REV * 1.5));
-        DMAStepper_StartAxis(i, true);  // Start moving towards limit switch
       }
       break;
     case CMD_PARK:
