@@ -129,6 +129,13 @@ struct PID_STATE {
   float Kp, Ki, Kd, Ks;
 } __attribute__((packed));
 
+enum PID_FLAGS : uint8_t {
+  PID_NONE = 0,
+  PID_ENABLED = 1,
+  PID_MASTER_SYNC = 1 << 1,
+  PID_DIAG_ENABLED = 1 << 2,  // Diagnostics: set false after validation if SimHub parsing is affected.
+};
+
 PCCMD pccmd;
 PCCMD_SH& pccmd_sh = *(PCCMD_SH*)&pccmd;
 
@@ -138,7 +145,8 @@ volatile bool dataReceived = false;
 uint8_t rxBuffer[RAW_DATA_LEN * 2];
 int rxOffset = 0;
 
-PID_STATE pidGlobal = { .version = 1, .flags = 0, .blend = 35, .Kp = 15.0f, .Ki = 0.0f, .Kd = 0.02f, .Ks = 0.30f };
+PID_STATE pidGlobal = { .version = 1, .flags = PID_FLAGS::PID_ENABLED, .blend = 100, .Kp = 15.0f, .Ki = 0.0f, .Kd = 0.02f, .Ks = 0.30f };
+
 const int PID_STATE_LEN = sizeof(PID_STATE);
 #define PID_EEPROM_MAGIC 0x5A
 #define PID_EEPROM_ADDR 0
@@ -269,8 +277,8 @@ void processCommand() {
       break;
     case CMD_SET_PID_ENABLE:
       for (int i = 0; i < NUM_AXES; i++) DMAStepper_SetPIDEnable(i, pccmd.data[0] != 0);
-      if (pccmd.data[0]) pidGlobal.flags |= 0x01;
-      else pidGlobal.flags &= ~0x01;
+      if (pccmd.data[0]) pidGlobal.flags |= PID_FLAGS::PID_ENABLED;
+      else pidGlobal.flags &= ~PID_FLAGS::PID_ENABLED;
       break;
     case CMD_SET_PID_BLEND:
       pidGlobal.blend = constrain((uint16_t)pccmd.data[0], 0, 100);
@@ -282,7 +290,7 @@ void processCommand() {
       break;
     case CMD_RESTORE_PID:
       if (loadPidFromEEPROM()) {
-        bool pidWasEnabled = (pidGlobal.flags & 0x01) != 0;
+        bool pidWasEnabled = (pidGlobal.flags & PID_FLAGS::PID_ENABLED) != 0;
         // Stop PID on all axes, apply new coefficients
         for (int i = 0; i < NUM_AXES; i++) {
           DMAStepper_SetPIDEnable(i, false);  // Stop PID
@@ -300,10 +308,9 @@ void processCommand() {
 }
 
 void setup() {
+  for (int pin = PA0; pin <= PC15; pin++) pinMode(pin, INPUT_PULLDOWN);
+  pinMode(LED_PIN, OUTPUT);
   loadPidFromEEPROM();
-  Serial.begin(SERIAL_BAUD_RATE);
-  while (!Serial)
-    ;
   DMAStepper_Init();
   DMAStepper_InitAxis(0, AXIS0_STEP, AXIS0_DIR, AXIS0_LIMIT);
   DMAStepper_InitAxis(1, AXIS1_STEP, AXIS1_DIR, AXIS1_LIMIT);
@@ -312,10 +319,12 @@ void setup() {
   for (int i = 0; i < NUM_AXES; i++) {
     DMAStepper_SetPID(i, pidGlobal.Kp, pidGlobal.Ki, pidGlobal.Kd, pidGlobal.Ks);
     DMAStepper_SetPIDBlend(i, (float)pidGlobal.blend / 100.0f);
-    bool pidEnabled = (pidGlobal.flags & 0x01) != 0;
+    bool pidEnabled = (pidGlobal.flags & PID_FLAGS::PID_ENABLED) != 0;
     DMAStepper_SetPIDEnable(i, pidEnabled);
   }
-  pinMode(LED_PIN, OUTPUT);
+  Serial.begin(SERIAL_BAUD_RATE);
+  while (!Serial)
+    ;
   digitalWrite(LED_PIN, HIGH);
 }
 
