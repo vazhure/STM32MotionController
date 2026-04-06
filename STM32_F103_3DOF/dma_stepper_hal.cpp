@@ -3,7 +3,7 @@
 // Discord: https://discord.gg/ynHCkrsmMA
 
 // 2026-04-05 Limit switches debouncing added
-// 2026-04-06 Homeing cylce fix. HOMING_RETRACT_DISTANCE_MM added
+// 2026-04-06 PARKING fix
 
 #include "dma_stepper_hal.h"
 #include <HardwareTimer.h>
@@ -393,6 +393,7 @@ void DMAStepper_Process(void) {
       // PARKING MODE (Hardcoded speed: PARKING_FREQUENCY_HZ)
       // =================================================================
       case MODE_PARKING:
+        DMAStepper_SetTarget(i, ax->minPos);
         if (abs(ax->currentPosition - ax->targetPosition) <= POSITION_TOLERANCE) {
           DMAStepper_StopAxis(i);
           ax->mode = MODE_READY;
@@ -400,7 +401,6 @@ void DMAStepper_Process(void) {
           ax->accelLastTime = millis();
         } else if (!ax->stepping) {
           DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
-          DMAStepper_SetTarget(i, ax->minPos);
           DMAStepper_StartAxis(i, ax->targetPosition > ax->currentPosition);
         }
         break;
