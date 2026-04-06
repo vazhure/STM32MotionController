@@ -28,16 +28,19 @@
 // Frequency limits (Hz)
 #define MAX_FREQUENCY_HZ 200000   // Absolute maximum step frequency
 #define SAFE_FREQUENCY_HZ 100000  // Recommended safe operating limit
-#define DEFAULT_FREQUENCY_HZ 50000
+#define DEFAULT_FREQUENCY_HZ SAFE_FREQUENCY_HZ
 #define MIN_FREQUENCY_HZ 50  // Minimum reliable step frequency
 
 // Special mode speeds (Hz)
 #define HOMING_FREQUENCY_HZ MMPERSECTOFREQHZ_SAFE(15)   // Homing search speed
 #define PARKING_FREQUENCY_HZ MMPERSECTOFREQHZ_SAFE(15)  // Parking movement speed
 
+// Homing parameters
+#define HOMING_RETRACT_DISTANCE_MM 3.0f  // Distance to back off from limit switch (mm)
+#define HOMING_RETRACT_DURATION_MS ((uint32_t)((HOMING_RETRACT_DISTANCE_MM * (float)STEPS_PER_REV * 1000.0f) / ((float)HOMING_FREQUENCY_HZ * MM_PER_REV)))
+
 // Homing timeouts (ms)
 #define HOMING_SEEK_TIMEOUT_MS 30000    // Max time to find limit switch
-#define HOMING_RETRACT_DURATION_MS 300  // Time to back off after hitting limit
 #define HOMING_CENTER_TIMEOUT_MS 30000  // Max time to move to center position
 #define MAX_ACCEL 80000                 // Max acceleration (steps/s²)
 
@@ -51,6 +54,7 @@
 #define ACCEL_RAMP_DISTANCE 50        // Distance for smooth accel/decel ramp (steps)
 #define DIRECTION_CHANGE_DELAY_US 10  // Delay when changing direction (µs)
 #define HOMING_CENTER_TOLERANCE 100   // Tolerance for centering (steps) - larger than POSITION_TOLERANCE
+#define HOMING_RETRACT_SETTLE_MS 50   // Settling delay after retract before moving to center (ms)
 
 // =============================================================================
 // SYSTEM CONSTANTS (Do not modify)
@@ -109,6 +113,7 @@ enum HomingSubState {
   H_IDLE = 0,
   H_SEEKING,
   H_RETRACT,
+  H_RETRACT_SETTLE,
   H_MOVING_CENTER,
   H_DONE
 };

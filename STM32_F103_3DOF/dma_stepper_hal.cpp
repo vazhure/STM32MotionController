@@ -3,6 +3,7 @@
 // Discord: https://discord.gg/ynHCkrsmMA
 
 // 2026-04-05 Limit switches debouncing added
+// 2026-04-06 Homeing cylce fix. HOMING_RETRACT_DISTANCE_MM added
 
 #include "dma_stepper_hal.h"
 #include <HardwareTimer.h>
@@ -316,9 +317,8 @@ void DMAStepper_Process(void) {
       // HOMING MODE (Hardcoded speed: HOMING_FREQUENCY_HZ)
       // =================================================================
       case MODE_HOMING:
-        DMAStepper_SetFrequency(i, HOMING_FREQUENCY_HZ);
-
         if (axisHomeState[i] == H_IDLE) {
+          DMAStepper_SetFrequency(i, HOMING_FREQUENCY_HZ);
           DMAStepper_SetPosition(i, 0);
           DMAStepper_SetTarget(i, (int32_t)(maxRange * HOMING_TRAVEL_LIMIT_MULT));
           DMAStepper_StartAxis(i, true);
@@ -328,31 +328,43 @@ void DMAStepper_Process(void) {
 
         switch (axisHomeState[i]) {
           case H_SEEKING:
-            if (DMAStepper_CheckLimit(i) || now - axisHomeTime[i] > HOMING_SEEK_TIMEOUT_MS || ax->currentPosition > (int32_t)(maxRange * HOMING_OVERFLOW_LIMIT_MULT)) {
-              DMAStepper_StopAxis(i);
-              if (DMAStepper_CheckLimit(i)) {
-                DMAStepper_SetPosition(i, ax->maxPos);  // Set physical end as reference
-                axisHomeState[i] = H_RETRACT;
-                axisHomeTime[i] = now;
-              } else {
-                ax->mode = MODE_ALARM;
-                ax->homed = false;
-                axisHomeState[i] = H_IDLE;
+            {
+              bool limitHit = DMAStepper_CheckLimit(i);
+              bool timeout = now - axisHomeTime[i] > HOMING_SEEK_TIMEOUT_MS;
+              bool overflow = ax->currentPosition > (int32_t)(maxRange * HOMING_OVERFLOW_LIMIT_MULT);
+              if (limitHit || timeout || overflow) {
+                DMAStepper_StopAxis(i);
+                if (limitHit) {
+                  DMAStepper_SetPosition(i, ax->maxPos);  // Set physical end as reference
+                  axisHomeState[i] = H_RETRACT;
+                  axisHomeTime[i] = now;
+                } else {
+                  ax->mode = MODE_ALARM;
+                  ax->homed = false;
+                  axisHomeState[i] = H_IDLE;
+                }
+              } else if (!ax->stepping) {
+                DMAStepper_StartAxis(i, true);
               }
-            } else if (!ax->stepping) {
-              DMAStepper_StartAxis(i, true);
             }
             break;
 
           case H_RETRACT:
             if (now - axisHomeTime[i] > HOMING_RETRACT_DURATION_MS) {
               DMAStepper_StopAxis(i);
+              axisHomeTime[i] = now;  // Reset timer for settling delay
+              axisHomeState[i] = H_RETRACT_SETTLE;
+            } else if (!ax->stepping) {
+              DMAStepper_StartAxis(i, false);
+            }
+            break;
+
+          case H_RETRACT_SETTLE:
+            if (now - axisHomeTime[i] > HOMING_RETRACT_SETTLE_MS) {
               DMAStepper_SetTarget(i, (ax->minPos + ax->maxPos) / 2);
               DMAStepper_StartAxis(i, false);
               axisHomeState[i] = H_MOVING_CENTER;
               axisHomeTime[i] = now;
-            } else if (!ax->stepping) {
-              DMAStepper_StartAxis(i, false);
             }
             break;
 
@@ -381,15 +393,14 @@ void DMAStepper_Process(void) {
       // PARKING MODE (Hardcoded speed: PARKING_FREQUENCY_HZ)
       // =================================================================
       case MODE_PARKING:
-        DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
-        DMAStepper_SetTarget(i, ax->minPos);
-
         if (abs(ax->currentPosition - ax->targetPosition) <= POSITION_TOLERANCE) {
           DMAStepper_StopAxis(i);
           ax->mode = MODE_READY;
           ax->limitedFreq = 0;
           ax->accelLastTime = millis();
         } else if (!ax->stepping) {
+          DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
+          DMAStepper_SetTarget(i, ax->minPos);
           DMAStepper_StartAxis(i, ax->targetPosition > ax->currentPosition);
         }
         break;

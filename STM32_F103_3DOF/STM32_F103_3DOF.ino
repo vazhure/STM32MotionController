@@ -36,6 +36,8 @@
  * =============================================================================
  */
 
+ // 2026-04-06 Homeing cylce fix. CMD_MOVE_SH fix
+
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
 // Discord: https://discord.gg/ynHCkrsmMA
@@ -43,6 +45,15 @@
 #include <EEPROM.h>
 #include <string.h>
 #define SERIAL_BAUD_RATE 115200
+
+// PID parameter scaling factors (divide integer protocol values to get float)
+#define PID_KP_SCALE 10.0f   // Kp: protocol_value / 10.0 -> actual Kp
+#define PID_KI_SCALE 10.0f   // Ki: protocol_value / 10.0 -> actual Ki
+#define PID_KD_SCALE 100.0f  // Kd: protocol_value / 100.0 -> actual Kd
+#define PID_KS_SCALE 100.0f  // Ks: protocol_value / 100.0 -> actual Ks
+
+// SimHub 16-bit data range
+#define SH_DATA_MAX_VALUE 65535
 
 // =============================================================================
 // PIN ASSIGNMENTS (AXIS3_LIMIT moved to PB12 to avoid USB conflict on PA11)
@@ -192,10 +203,10 @@ void processCommand() {
     case CMD_MOVE_SH:
       for (int i = 0; i < NUM_AXES; i++) {
         uint16_t val = pccmd_sh.data[i];
-        val = (val >> 8) | (val << 8);
+        val = (val >> 8) | (val << 8);  // Byte-swap to big-endian
         AxisState* ax = DMAStepper_GetAxis(i);
         if (ax && ax->homed && ax->mode == MODE_READY) {
-          int32_t target = map(val, 0, 65535, ax[i].minPos, ax[i].maxPos);
+          int32_t target = map(val, 0, SH_DATA_MAX_VALUE, ax->minPos, ax->maxPos);
           DMAStepper_SetTarget(i, target);
         }
       }
@@ -252,19 +263,19 @@ void processCommand() {
       break;
     case CMD_GET_STATE: sendAllStates(); break;
     case CMD_SET_PID_KP:
-      pidGlobal.Kp = constrain((float)pccmd.data[0] / 10.0f, 0.0f, 200.0f);
+      pidGlobal.Kp = constrain((float)pccmd.data[0] / PID_KP_SCALE, 0.0f, 200.0f);
       for (int i = 0; i < NUM_AXES; i++) DMAStepper_SetPID(i, pidGlobal.Kp, pidGlobal.Ki, pidGlobal.Kd, pidGlobal.Ks);
       break;
     case CMD_SET_PID_KI:
-      pidGlobal.Ki = constrain((float)pccmd.data[0] / 10.0f, 0.0f, 50.0f);
+      pidGlobal.Ki = constrain((float)pccmd.data[0] / PID_KI_SCALE, 0.0f, 50.0f);
       for (int i = 0; i < NUM_AXES; i++) DMAStepper_SetPID(i, pidGlobal.Kp, pidGlobal.Ki, pidGlobal.Kd, pidGlobal.Ks);
       break;
     case CMD_SET_PID_KD:
-      pidGlobal.Kd = constrain((float)pccmd.data[0] / 100.0f, 0.0f, 50.0f);
+      pidGlobal.Kd = constrain((float)pccmd.data[0] / PID_KD_SCALE, 0.0f, 50.0f);
       for (int i = 0; i < NUM_AXES; i++) DMAStepper_SetPID(i, pidGlobal.Kp, pidGlobal.Ki, pidGlobal.Kd, pidGlobal.Ks);
       break;
     case CMD_SET_PID_KS:
-      pidGlobal.Ks = constrain((float)pccmd.data[0] / 100.0f, 0.0f, 1.0f);
+      pidGlobal.Ks = constrain((float)pccmd.data[0] / PID_KS_SCALE, 0.0f, 1.0f);
       for (int i = 0; i < NUM_AXES; i++) DMAStepper_SetPID(i, pidGlobal.Kp, pidGlobal.Ki, pidGlobal.Kd, pidGlobal.Ks);
       break;
     case CMD_SET_PID_ENABLE:
