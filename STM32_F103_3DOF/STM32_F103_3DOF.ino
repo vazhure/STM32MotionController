@@ -36,7 +36,7 @@
  * =============================================================================
  */
 
- // 2026-04-06 Homeing cylce fix. CMD_MOVE_SH fix
+// 2026-04-06 Homeing cylce fix. CMD_MOVE_SH fix
 
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
@@ -60,17 +60,17 @@
 // =============================================================================
 #define AXIS0_STEP PA0
 #define AXIS0_DIR PA1
-#define AXIS0_LIMIT PB12 //PA8
+#define AXIS0_LIMIT PB12  //PA8
 #define AXIS1_STEP PA2
 #define AXIS1_DIR PA3
-#define AXIS1_LIMIT PA8 //PA9
+#define AXIS1_LIMIT PA8  //PA9
 #define AXIS2_STEP PA4
 #define AXIS2_DIR PA5
-#define AXIS2_LIMIT PA9 // PA10
+#define AXIS2_LIMIT PA9  // PA10
 #define AXIS3_STEP PA6
 #define AXIS3_DIR PA7
-#define AXIS3_LIMIT PA10// PB12
-#define LED_PIN PB2  //PC13
+#define AXIS3_LIMIT PA10  // PB12
+#define LED_PIN PB2       //PC13
 
 // Limit Pins -> GND, NC (use normally closed switches)
 // STEP-, DIR- -> GND
@@ -197,7 +197,17 @@ void processCommand() {
     case CMD_MOVE:
       for (int i = 0; i < NUM_AXES; i++) {
         AxisState* ax = DMAStepper_GetAxis(i);
-        if (ax && ax->homed && ax->mode == MODE_READY) DMAStepper_SetTarget(i, pccmd.data[i]);
+        if (!ax || !ax->homed) continue;
+        if (ax->mode == MODE_READY) {
+          DMAStepper_SetTarget(i, pccmd.data[i]);
+        } else if (ax->mode == MODE_PARKED || ax->mode == MODE_UNPARKING) {
+          // Store target and start unparking to center at parking speed
+          ax->pendingTarget = pccmd.data[i];
+          ax->hasPendingTarget = true;
+          if (ax->mode == MODE_PARKED) {
+            ax->mode = MODE_UNPARKING;
+          }
+        }
       }
       break;
     case CMD_MOVE_SH:
@@ -205,9 +215,16 @@ void processCommand() {
         uint16_t val = pccmd_sh.data[i];
         val = (val >> 8) | (val << 8);  // Byte-swap to big-endian
         AxisState* ax = DMAStepper_GetAxis(i);
-        if (ax && ax->homed && ax->mode == MODE_READY) {
-          int32_t target = map(val, 0, SH_DATA_MAX_VALUE, ax->minPos, ax->maxPos);
+        if (!ax || !ax->homed) continue;
+        int32_t target = map(val, 0, SH_DATA_MAX_VALUE, ax->minPos, ax->maxPos);
+        if (ax->mode == MODE_READY) {
           DMAStepper_SetTarget(i, target);
+        } else if (ax->mode == MODE_PARKED || ax->mode == MODE_UNPARKING) {
+          ax->pendingTarget = target;
+          ax->hasPendingTarget = true;
+          if (ax->mode == MODE_PARKED) {
+            ax->mode = MODE_UNPARKING;
+          }
         }
       }
       break;
@@ -239,9 +256,11 @@ void processCommand() {
       for (int i = 0; i < NUM_AXES; i++) {
         AxisState* ax = DMAStepper_GetAxis(i);
         if (!ax) continue;
-        if (ax->homed && ax->mode != MODE_ALARM) {
-          continue;  // Skip if already homed and not in alarm
+        if (ax->homed && ax->mode != MODE_ALARM && ax->mode != MODE_PARKED) {
+          continue;  // Skip if already homed and not in alarm/parked
         }
+        ax->pendingTarget = 0;
+        ax->hasPendingTarget = false;
         ax->mode = MODE_HOMING;
       }
       break;

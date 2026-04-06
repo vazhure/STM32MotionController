@@ -1,6 +1,7 @@
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
 // Discord: https://discord.gg/ynHCkrsmMA
+
 #ifndef DMA_STEPPER_HAL_H
 #define DMA_STEPPER_HAL_H
 #include <Arduino.h>
@@ -97,6 +98,8 @@ typedef struct {
   float pidMaxFreq;
   bool pidEnabled;
   float pidBlend;
+  int32_t pendingTarget;    // Stored CMD_MOVE target during unparking
+  bool hasPendingTarget;    // True when pendingTarget is valid
 } AxisState;
 
 enum AxisMode {
@@ -106,7 +109,9 @@ enum AxisMode {
   MODE_HOMING = 3,
   MODE_PARKING = 4,
   MODE_READY = 5,
-  MODE_ALARM = 6
+  MODE_ALARM = 6,
+  MODE_PARKED = 7,
+  MODE_UNPARKING = 8
 };
 
 enum HomingSubState {

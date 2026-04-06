@@ -3,7 +3,7 @@
 // Discord: https://discord.gg/ynHCkrsmMA
 
 // 2026-04-05 Limit switches debouncing added
-// 2026-04-06 PARKING fix
+// 2026-04-06 PARKING fix, new modes: MODE_PARKED, MODE_UNPARKING
 
 #include "dma_stepper_hal.h"
 #include <HardwareTimer.h>
@@ -113,6 +113,8 @@ void DMAStepper_Init(void) {
     axisState[i].pidBlend = 0.35f;
     stepState[i] = false;
     limitDebounce[i] = 1;  // Initialize debounce counter
+    axisState[i].pendingTarget = 0;
+    axisState[i].hasPendingTarget = false;
   }
 }
 
@@ -396,12 +398,38 @@ void DMAStepper_Process(void) {
         DMAStepper_SetTarget(i, ax->minPos);
         if (abs(ax->currentPosition - ax->targetPosition) <= POSITION_TOLERANCE) {
           DMAStepper_StopAxis(i);
-          ax->mode = MODE_READY;
+          ax->mode = MODE_PARKED;
           ax->limitedFreq = 0;
           ax->accelLastTime = millis();
+          ax->hasPendingTarget = false;
         } else if (!ax->stepping) {
           DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
           DMAStepper_StartAxis(i, ax->targetPosition > ax->currentPosition);
+        }
+        break;
+
+      // =================================================================
+      // UNPARKING MODE (Move to center at parking speed before READY)
+      // =================================================================
+      case MODE_UNPARKING:
+        {
+          int32_t centerPos = (ax->minPos + ax->maxPos) / 2;
+          DMAStepper_SetTarget(i, centerPos);
+          if (abs(ax->currentPosition - centerPos) <= HOMING_CENTER_TOLERANCE) {
+            DMAStepper_StopAxis(i);
+            ax->mode = MODE_READY;
+            ax->limitedFreq = 0;
+            ax->accelLastTime = millis();
+            // Apply pending CMD_MOVE target if stored during unpark
+            if (ax->hasPendingTarget) {
+              DMAStepper_SetTarget(i, ax->pendingTarget);
+              ax->hasPendingTarget = false;
+              ax->pendingTarget = 0;
+            }
+          } else if (!ax->stepping) {
+            DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
+            DMAStepper_StartAxis(i, centerPos > ax->currentPosition);
+          }
         }
         break;
 
@@ -459,6 +487,7 @@ void DMAStepper_Process(void) {
       case MODE_DISABLED:
       case MODE_ALARM:
       case MODE_UNKNOWN:
+      case MODE_PARKED:
         DMAStepper_StopAxis(i);
         break;
     }
