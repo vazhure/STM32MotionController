@@ -117,7 +117,9 @@ enum MODE : uint8_t { UNKNOWN,
                       HOMEING,
                       PARKING,
                       READY,
-                      ALARM
+                      ALARM,
+                      PARKED,
+                      UNPARKING
 };
 
 enum COMMAND : uint8_t { CMD_HOME,
@@ -860,6 +862,10 @@ volatile uint8_t currentDir = LOW;
 
 volatile bool LimitChanged = true;
 
+// Unparking: stores CMD_MOVE target while returning from parked position
+volatile int32_t pendingMoveTarget = 0;
+volatile bool hasPendingMove = false;
+
 // ========== TIMER-BASED STEPPING VARIABLES ==========
 HardwareTimer stepTimer(2);  // Timer 2 for Roger Clark core
 volatile bool steppingEnabled = false;
@@ -1106,11 +1112,13 @@ void receiveEvent(int size) {
     }
     switch (cmd) {
       case COMMAND::CMD_HOME:
-        // Ignore repeated HOME when already homed and ready.
+        // Ignore repeated HOME when already homed and ready (but allow from PARKED).
         if (mode == MODE::READY && bHomed) {
           break;
         }
         if (mode != MODE::HOMEING) {
+          hasPendingMove = false;
+          pendingMoveTarget = 0;
           stopStepping();  // Ensure clear state
           setStepFrequency(delayToFreq(HOMEING_PULSE_DELAY));
           accelStepCount = 0;
@@ -1139,6 +1147,14 @@ void receiveEvent(int size) {
       case COMMAND::CMD_MOVE:
         if (bHomed && mode == MODE::READY) {
           targetPos = clamp((int32_t)data, (int32_t)MIN_POS, (int32_t)MAX_POS);
+        } else if (bHomed && (mode == MODE::PARKED || mode == MODE::UNPARKING)) {
+          // Store target and start unparking to center at parking speed
+          pendingMoveTarget = clamp((int32_t)data, (int32_t)MIN_POS, (int32_t)MAX_POS);
+          hasPendingMove = true;
+          if (mode == MODE::PARKED) {
+            mode = MODE::UNPARKING;
+            resetPID();
+          }
         }
         break;
       case COMMAND::CMD_CLEAR_ALARM:
@@ -1148,6 +1164,8 @@ void receiveEvent(int size) {
           stopStepping();
           LimitChanged = true;
           resetPID();
+          hasPendingMove = false;
+          pendingMoveTarget = 0;
 
           // FIX: If we were homing, we are no longer homed
           if (mode == MODE::HOMEING) {
@@ -1164,6 +1182,8 @@ void receiveEvent(int size) {
         // FIX: If homing, reset homed flag
         if (mode == MODE::HOMEING) bHomed = false;
 
+        hasPendingMove = false;
+        pendingMoveTarget = 0;
         mode = MODE::DISABLED;
         stopStepping();
         break;
@@ -1206,6 +1226,8 @@ void receiveEvent(int size) {
         break;
       case COMMAND::SET_ALARM:
         bHomed = false;
+        hasPendingMove = false;
+        pendingMoveTarget = 0;
         mode = MODE::ALARM;
         stopStepping();
         resetPID();
@@ -1388,7 +1410,50 @@ void loop() {
 
         stopStepping();
         resetPID();
+        hasPendingMove = false;
+        mode = MODE::PARKED;
+      }
+      break;
+
+    case MODE::UNPARKING:
+      {
+        int32_t centerPos = (MIN_POS + MAX_POS) / 2;
+        targetPos = centerPos;
+        uint32_t homeFreq = delayToFreq(HOMEING_PULSE_DELAY);
+        setStepFrequency(homeFreq);
+
+        uint8_t dir = (targetPos > currentPos) ? HIGH : LOW;
+        startStepping(dir);
+
+        while (targetPos != currentPos) {
+          if (mode == MODE::ALARM || !steppingEnabled) {
+            break;
+          }
+          delay(1);
+        }
+
+        // Abort if mode changed during unparking
+        if (mode != MODE::UNPARKING) {
+          stopStepping();
+          break;
+        }
+
+        if (mode == MODE::ALARM) {
+          bHomed = false;
+          stopStepping();
+          break;
+        }
+
+        stopStepping();
+        resetPID();
         mode = MODE::READY;
+
+        // Apply pending CMD_MOVE target if stored during unparking
+        if (hasPendingMove) {
+          targetPos = pendingMoveTarget;
+          hasPendingMove = false;
+          pendingMoveTarget = 0;
+        }
       }
       break;
 
@@ -1434,6 +1499,10 @@ void loop() {
           }
         }
       }
+      break;
+
+    case MODE::PARKED:
+      stopStepping();
       break;
 
     case MODE::ALARM:
