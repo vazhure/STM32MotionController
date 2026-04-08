@@ -4,6 +4,8 @@
 
 // 2026-04-05 Limit switches debouncing added
 // 2026-04-06 PARKING fix, new modes: MODE_PARKED, MODE_UNPARKING
+// 2026-04-08 BUGFIX: CMD_HOME from PARKED/UNPARKING, pidLastTime separation,
+//            DMAStepper_StartHoming(), stale homing state cleanup
 
 #include "dma_stepper_hal.h"
 #include <HardwareTimer.h>
@@ -90,6 +92,7 @@ void DMAStepper_Init(void) {
   sharedTimer->refresh();
   sharedTimer->resume();
 
+  uint32_t now = millis();
   for (int i = 0; i < NUM_AXES; i++) {
     axisState[i].currentPosition = 0;
     axisState[i].targetPosition = 0;
@@ -103,6 +106,8 @@ void DMAStepper_Init(void) {
     axisState[i].maxSpeedMM = DEFAULT_SPEED_MM_SEC;
     axisState[i].maxAccel = MAX_ACCEL;
     axisState[i].limitedFreq = 0;
+    axisState[i].accelLastTime = now;   // BUGFIX: initialize to avoid first-call spike
+    axisState[i].pidLastTime = now;     // BUGFIX: separate PID timer, initialized
     axisState[i].Kp = 15.0f;
     axisState[i].Ki = 0.0f;
     axisState[i].Kd = 0.02f;
@@ -112,9 +117,8 @@ void DMAStepper_Init(void) {
     axisState[i].pidEnabled = false;
     axisState[i].pidBlend = 0.35f;
     stepState[i] = false;
-    limitDebounce[i] = 1;  // Initialize debounce counter
-    axisState[i].pendingTarget = 0;
-    axisState[i].hasPendingTarget = false;
+    limitDebounce[i] = 1;
+    axisState[i].pendingTarget = PENDING_TARGET_NONE;
   }
 }
 
@@ -137,7 +141,7 @@ void DMAStepper_InitAxis(uint8_t axisIdx, uint8_t stepPin, uint8_t dirPin, uint8
   digitalWrite(stepPin, LOW);
   digitalWrite(dirPin, LOW);
 
-  limitDebounce[axisIdx] = 1;  // Reset debounce counter for this axis
+  limitDebounce[axisIdx] = 1;
   axisState[axisIdx].mode = MODE_CONNECTED;
 }
 
@@ -201,6 +205,23 @@ void DMAStepper_SetMaxSpeed(uint8_t axisIdx, uint32_t speedMM) {
 }
 
 // =============================================================================
+// BUGFIX: Safe Homing Start
+// Resets all homing sub-state, debounce counters, pending targets, and sets MODE_HOMING.
+// This prevents stale state issues (H_DONE from previous cycle, interrupted H_SEEKING, etc.)
+// =============================================================================
+void DMAStepper_StartHoming(uint8_t axisIdx) {
+  if (axisIdx >= NUM_AXES) return;
+  AxisState* ax = &axisState[axisIdx];
+  if (ax->mode == MODE_DISABLED) return;
+  DMAStepper_StopAxis(axisIdx);
+  ax->pendingTarget = PENDING_TARGET_NONE;
+  ax->limitedFreq = 0;
+  axisHomeState[axisIdx] = H_IDLE;     // Fresh start — always resets sub-state
+  limitDebounce[axisIdx] = 1;           // Reset debounce counter
+  ax->mode = MODE_HOMING;
+}
+
+// =============================================================================
 // LIMIT SWITCH CHECK WITH DEBOUNCE
 // =============================================================================
 bool DMAStepper_CheckLimit(uint8_t axisIdx) {
@@ -243,6 +264,8 @@ void DMAStepper_SetPIDEnable(uint8_t axisIdx, bool enable) {
   axisState[axisIdx].integral = 0;
   axisState[axisIdx].prevError = (float)(axisState[axisIdx].targetPosition - axisState[axisIdx].currentPosition);
   axisState[axisIdx].derivativeFilter = 0;
+  // BUGFIX: use pidLastTime (not accelLastTime) to avoid corrupting accel limiter
+  axisState[axisIdx].pidLastTime = millis();
 }
 
 void DMAStepper_SetPIDBlend(uint8_t axisIdx, float blend) {
@@ -250,10 +273,13 @@ void DMAStepper_SetPIDBlend(uint8_t axisIdx, float blend) {
   axisState[axisIdx].pidBlend = constrain(blend, 0.0f, 1.0f);
 }
 
+// BUGFIX: computePID now uses pidLastTime instead of accelLastTime.
+// Previously both computePID and applyAccelLimit shared accelLastTime,
+// causing applyAccelLimit to always see dt≈0 when PID was active.
 static float computePID(AxisState* ax, uint32_t currentTime) {
-  float dt = (float)(currentTime - ax->accelLastTime) / 1000.0f;
+  float dt = (float)(currentTime - ax->pidLastTime) / 1000.0f;
   if (dt <= 0.0f || dt > 0.5f) dt = 0.001f;
-  ax->accelLastTime = currentTime;
+  ax->pidLastTime = currentTime;
 
   float error = (float)(ax->targetPosition - ax->currentPosition);
   float proportional = ax->Kp * error;
@@ -298,12 +324,16 @@ static uint32_t applyAccelLimit(AxisState* ax, uint32_t desiredFreq) {
 void DMAStepper_ClearAlarm(void) {
   DMAStepper_StopAll();
   for (int i = 0; i < NUM_AXES; i++) {
+    // BUGFIX: reset homing sub-state on alarm clear to prevent stale H_SEEKING etc.
     axisHomeState[i] = H_IDLE;
-    limitDebounce[i] = 1;  // Reset debounce counter on alarm clear
+    limitDebounce[i] = 1;
     AxisState* ax = &axisState[i];
-    ax->mode = ax->homed ? MODE_READY : MODE_CONNECTED;
-    ax->limitedFreq = 0;
-    ax->accelLastTime = millis();
+    if (ax->mode == MODE_ALARM) {
+      ax->mode = ax->homed ? MODE_READY : MODE_CONNECTED;
+      ax->limitedFreq = 0;
+      ax->accelLastTime = millis();
+      ax->pidLastTime = millis();  // BUGFIX: reset both timers
+    }
   }
 }
 
@@ -319,6 +349,9 @@ void DMAStepper_Process(void) {
       // HOMING MODE (Hardcoded speed: HOMING_FREQUENCY_HZ)
       // =================================================================
       case MODE_HOMING:
+        // Homing sub-state is managed by DMAStepper_StartHoming() (sets H_IDLE)
+        // and by internal transitions (H_SEEKING→H_RETRACT→...→H_DONE).
+        // No need to force-reset here — StartHoming() already guarantees clean H_IDLE entry.
         if (axisHomeState[i] == H_IDLE) {
           DMAStepper_SetFrequency(i, HOMING_FREQUENCY_HZ);
           DMAStepper_SetPosition(i, 0);
@@ -378,6 +411,7 @@ void DMAStepper_Process(void) {
               axisHomeState[i] = H_DONE;
               ax->limitedFreq = 0;
               ax->accelLastTime = millis();
+              ax->pidLastTime = millis();  // BUGFIX: reset PID timer too
             } else if (now - axisHomeTime[i] > HOMING_CENTER_TIMEOUT_MS) {
               ax->mode = MODE_ALARM;
               ax->homed = false;
@@ -401,7 +435,6 @@ void DMAStepper_Process(void) {
           ax->mode = MODE_PARKED;
           ax->limitedFreq = 0;
           ax->accelLastTime = millis();
-          ax->hasPendingTarget = false;
         } else if (!ax->stepping) {
           DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
           DMAStepper_StartAxis(i, ax->targetPosition > ax->currentPosition);
@@ -420,11 +453,11 @@ void DMAStepper_Process(void) {
             ax->mode = MODE_READY;
             ax->limitedFreq = 0;
             ax->accelLastTime = millis();
+            ax->pidLastTime = millis();  // BUGFIX: reset PID timer on mode transition
             // Apply pending CMD_MOVE target if stored during unpark
-            if (ax->hasPendingTarget) {
+            if (ax->pendingTarget != PENDING_TARGET_NONE) {
               DMAStepper_SetTarget(i, ax->pendingTarget);
-              ax->hasPendingTarget = false;
-              ax->pendingTarget = 0;
+              ax->pendingTarget = PENDING_TARGET_NONE;
             }
           } else if (!ax->stepping) {
             DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
@@ -458,6 +491,7 @@ void DMAStepper_Process(void) {
                 ax->integral = 0;
                 ax->prevError = (float)error;
                 ax->derivativeFilter = 0;
+                ax->pidLastTime = millis();  // BUGFIX: reset PID timer on start
               }
               DMAStepper_StartAxis(i, forward);
             } else if (ax->direction != forward) {
@@ -468,6 +502,7 @@ void DMAStepper_Process(void) {
                 ax->integral = 0;
                 ax->prevError = (float)error;
                 ax->derivativeFilter = 0;
+                ax->pidLastTime = millis();  // BUGFIX: reset PID timer on direction change
               }
               DMAStepper_StartAxis(i, forward);
             }

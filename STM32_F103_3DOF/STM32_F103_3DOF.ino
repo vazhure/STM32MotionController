@@ -35,8 +35,9 @@
  *      (Logic: LOW = idle, HIGH = triggered via internal pull-up)
  * =============================================================================
  */
-
-// 2026-04-06 Homeing cylce fix. CMD_MOVE_SH fix
+ 
+ // 2026-04-06 Homeing cylce fix. CMD_MOVE_SH fix
+ // 2026-04-08 BUGFIX: CMD_HOME from PARKED/UNPARKING/DISABLED, use DMAStepper_StartHoming()
 
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
@@ -60,17 +61,17 @@
 // =============================================================================
 #define AXIS0_STEP PA0
 #define AXIS0_DIR PA1
-#define AXIS0_LIMIT PB12  //PA8
+#define AXIS0_LIMIT PB12 //PA8
 #define AXIS1_STEP PA2
 #define AXIS1_DIR PA3
-#define AXIS1_LIMIT PA8  //PA9
+#define AXIS1_LIMIT PA8 //PA9
 #define AXIS2_STEP PA4
 #define AXIS2_DIR PA5
-#define AXIS2_LIMIT PA9  // PA10
+#define AXIS2_LIMIT PA9 // PA10
 #define AXIS3_STEP PA6
 #define AXIS3_DIR PA7
-#define AXIS3_LIMIT PA10  // PB12
-#define LED_PIN PB2       //PC13
+#define AXIS3_LIMIT PA10// PB12
+#define LED_PIN PB2  //PC13
 
 // Limit Pins -> GND, NC (use normally closed switches)
 // STEP-, DIR- -> GND
@@ -203,7 +204,6 @@ void processCommand() {
         } else if (ax->mode == MODE_PARKED || ax->mode == MODE_UNPARKING) {
           // Store target and start unparking to center at parking speed
           ax->pendingTarget = pccmd.data[i];
-          ax->hasPendingTarget = true;
           if (ax->mode == MODE_PARKED) {
             ax->mode = MODE_UNPARKING;
           }
@@ -221,7 +221,6 @@ void processCommand() {
           DMAStepper_SetTarget(i, target);
         } else if (ax->mode == MODE_PARKED || ax->mode == MODE_UNPARKING) {
           ax->pendingTarget = target;
-          ax->hasPendingTarget = true;
           if (ax->mode == MODE_PARKED) {
             ax->mode = MODE_UNPARKING;
           }
@@ -252,16 +251,19 @@ void processCommand() {
       break;
     case CMD_CLEAR_ALARM: DMAStepper_ClearAlarm(); break;
     case CMD_HOME:
-      // Start homing sequence
+      // BUGFIX: Use DMAStepper_StartHoming() which safely resets homing sub-state,
+      // debounce counters, and pending targets before entering MODE_HOMING.
+      // This fixes the bug where CMD_HOME from PARKED/UNPARKING/DISABLED failed
+      // because axisHomeState was stuck at H_DONE from previous cycle.
       for (int i = 0; i < NUM_AXES; i++) {
         AxisState* ax = DMAStepper_GetAxis(i);
         if (!ax) continue;
-        if (ax->homed && ax->mode != MODE_ALARM && ax->mode != MODE_PARKED) {
-          continue;  // Skip if already homed and not in alarm/parked
+        // Only skip if already homed AND in normal ready operation.
+        // Allow re-homing from: ALARM, PARKED, UNPARKING, DISABLED, CONNECTED, UNKNOWN
+        if (ax->homed && (ax->mode == MODE_READY || ax->mode == MODE_PARKED)) {
+          continue;  // Skip — already operational
         }
-        ax->pendingTarget = 0;
-        ax->hasPendingTarget = false;
-        ax->mode = MODE_HOMING;
+        DMAStepper_StartHoming(i);  // Safe entry: resets sub-state, stops motor, sets MODE_HOMING
       }
       break;
     case CMD_PARK:

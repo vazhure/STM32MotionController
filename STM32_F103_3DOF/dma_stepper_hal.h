@@ -1,7 +1,6 @@
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
 // Discord: https://discord.gg/ynHCkrsmMA
-
 #ifndef DMA_STEPPER_HAL_H
 #define DMA_STEPPER_HAL_H
 #include <Arduino.h>
@@ -65,6 +64,7 @@
 #define SAFE_SPEED_MM_SEC (int)(SAFE_FREQUENCY_HZ * MM_PER_STEP)
 #define DEFAULT_SPEED_MM_SEC (int)(DEFAULT_FREQUENCY_HZ * MM_PER_STEP)
 #define NUM_AXES 4
+#define PENDING_TARGET_NONE INT32_MIN  // Sentinel: no pending target queued
 
 // =============================================================================
 // DATA STRUCTURES
@@ -88,7 +88,8 @@ typedef struct {
   uint32_t maxFreqHz;
   uint32_t maxSpeedMM;
   float limitedFreq;
-  uint32_t accelLastTime;
+  uint32_t accelLastTime;   // Used by applyAccelLimit() only
+  uint32_t pidLastTime;     // Used by computePID() only (BUGFIX: separate from accelLastTime)
   uint32_t maxAccel;
   float Kp, Ki, Kd, Ks;
   float integral;
@@ -98,8 +99,7 @@ typedef struct {
   float pidMaxFreq;
   bool pidEnabled;
   float pidBlend;
-  int32_t pendingTarget;    // Stored CMD_MOVE target during unparking
-  bool hasPendingTarget;    // True when pendingTarget is valid
+  int32_t pendingTarget;    // Stored CMD_MOVE target during unparking (PENDING_TARGET_NONE = none)
 } AxisState;
 
 enum AxisMode {
@@ -143,4 +143,6 @@ void DMAStepper_SetPIDBlend(uint8_t axisIdx, float blend);
 bool DMAStepper_CheckLimit(uint8_t axisIdx);
 void DMAStepper_ClearAlarm(void);
 void DMAStepper_Process(void);
+// BUGFIX: Safe homing start — resets sub-state, debounce, pending target, sets MODE_HOMING
+void DMAStepper_StartHoming(uint8_t axisIdx);
 #endif
