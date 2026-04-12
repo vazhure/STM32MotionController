@@ -19,6 +19,8 @@
 // stm32duino version
 // modified version from 2026-03-20 : Fixed Homing interruption logic (Reset/Disable now aborts homing state machine)
 // modified version from 2026-03-28 : Fixed setStepFrequency, startStepping. Canceling homeing if CMD_CLEAR ALARM appear
+// modified version from 2026-04-12 Master code: removed text commands for SimHub. (Sketch uses 31348 bytes (47%) of program storage space)
+// Slave: Sketch uses 34500 bytes (52%) of program storage space.
 
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // NOTE: MAKE SURE TO EDIT LINES FOR BALLSCREW LENGTH CONFIGURATION!
@@ -47,16 +49,14 @@
 #include <stdio.h>
 #include <bitset>
 #include <math.h>
-#include <ctype.h>
-#include <string.h>
-#include <stdlib.h>
+//#include <ctype.h>
 
 // Uncomment this line if you using SF1610
 #define SFU1610  // Used only in SLAVE devices
 
 // Uncomment this line to flash MASTER device
 // Comment this line to flash SLAVE devices
-//#define I2CMASTER
+#define I2CMASTER
 
 // Maximal number of linear actuators
 #define MAX_LINEAR_ACTUATORS 4
@@ -109,7 +109,7 @@ const T& clamp(const T& x, const T& a, const T& b) {
 #define SERIAL_TX_BUFFER_SIZE 512
 #define SERIAL_RX_BUFFER_SIZE 512
 
-#define LED_PIN PC13 //PB2  // PC13  // * Check your board. Some have PB2 or another (label near LED).
+#define LED_PIN PC13  //PB2  // PC13  // * Check your board. Some have PB2 or another (label near LED).
 
 enum MODE : uint8_t { UNKNOWN,
                       CONNECTED,
@@ -241,10 +241,6 @@ bool loadPidFromEEPROM() {
   return true;
 }
 
-void QueuePidTextCommand(COMMAND cmd, uint32_t data);
-void UpdateMasterPidMirror(COMMAND cmd, uint32_t data);
-void QueueSynchronizedTargets(const int32_t* targets);
-void DispatchSynchronizedTargetsIfDue(bool force);
 bool TransmitCMD(uint8_t addr, uint8_t cmd, uint32_t data);
 
 // Device states
@@ -345,233 +341,6 @@ uint8_t buf[RAW_DATA_LEN * 2];
 int offset = 0;
 volatile bool _bDataPresent = false;
 unsigned long _lasttime;
-char txtbuf[48];
-uint8_t txtoffset = 0;
-bool textCmdPending = false;
-COMMAND textPendingCmd = COMMAND::CMD_SET_PID_KP;
-uint32_t textPendingData = 0;
-bool syncTrajectoryEnabled = false;
-const uint16_t syncTrajectoryPeriodMs = 10;
-int32_t syncTargets[MAX_LINEAR_ACTUATORS] = { 0 };
-bool syncTargetsPending = false;
-uint32_t syncLastDispatchMs = 0;
-
-const uint32_t PID_DIAG_INTERVAL_MS = 5000;
-uint32_t pidDiagLastMs = 0;
-
-bool EqualsIgnoreCase(const char* a, const char* b) {
-  while (*a && *b) {
-    if (toupper((unsigned char)*a) != toupper((unsigned char)*b)) {
-      return false;
-    }
-    ++a;
-    ++b;
-  }
-  return *a == '\0' && *b == '\0';
-}
-
-void QueuePidTextCommand(COMMAND cmd, uint32_t data) {
-  textPendingCmd = cmd;
-  textPendingData = data;
-  textCmdPending = true;
-}
-
-void UpdateMasterPidMirror(COMMAND cmd, uint32_t data) {
-  switch (cmd) {
-    case COMMAND::CMD_SET_PID_KP:
-      pid_state.masterPidKp = clamp((float)data / 10.0f, 0.0f, 200.0f);
-      break;
-    case COMMAND::CMD_SET_PID_KI:
-      pid_state.masterPidKi = clamp((float)data / 10.0f, 0.0f, 50.0f);
-      break;
-    case COMMAND::CMD_SET_PID_KD:
-      pid_state.masterPidKd = clamp((float)data / 100.0f, 0.0f, 50.0f);
-      break;
-    case COMMAND::CMD_SET_PID_KS:
-      pid_state.masterPidKs = clamp((float)data / 100.0f, 0.0f, 1.0f);
-      break;
-    case COMMAND::CMD_SET_PID_ENABLE:
-      if (data != 0)
-        SET_FLAG(pid_state.flags, PID_FLAGS::PID_ENABLED);
-      else
-        CLEAR_FLAG(pid_state.flags, PID_FLAGS::PID_ENABLED);
-      break;
-    case COMMAND::CMD_SET_PID_BLEND:
-      pid_state.masterPidBlend = (uint16_t)data;
-      break;
-    default:
-      break;
-  }
-}
-
-void PrintPidDiagnosticsIfDue() {
-  if (!HAS_FLAG(pid_state.flags, PID_DIAG_ENABLED)) {
-    return;
-  }
-  uint32_t now = millis();
-  if ((now - pidDiagLastMs) < PID_DIAG_INTERVAL_MS) {
-    return;
-  }
-  pidDiagLastMs = now;
-
-  Serial.print("PID EN=");
-  Serial.print(HAS_FLAG(pid_state.flags, PID_FLAGS::PID_ENABLED) ? 1 : 0);
-  Serial.print(" BLEND=");
-  Serial.print(pid_state.masterPidBlend / 100.0f, 2);
-  Serial.print(" KP=");
-  Serial.print(pid_state.masterPidKp, 2);
-  Serial.print(" KI=");
-  Serial.print(pid_state.masterPidKi, 2);
-  Serial.print(" KD=");
-  Serial.print(pid_state.masterPidKd, 3);
-  Serial.print(" KS=");
-  Serial.print(pid_state.masterPidKs, 2);
-  Serial.print(" SYNC=");
-  Serial.println(HAS_FLAG(pid_state.flags, PID_FLAGS::PID_MASTER_SYNC) ? 1 : 0);
-}
-
-void QueueSynchronizedTargets(const int32_t* targets) {
-  memcpy(syncTargets, targets, sizeof(syncTargets));
-  syncTargetsPending = true;
-}
-
-void DispatchSynchronizedTargetsIfDue(bool force) {
-  if (!syncTrajectoryEnabled || !syncTargetsPending || estopLatched) {
-    return;
-  }
-  uint32_t now = millis();
-  if (!force && syncLastDispatchMs != 0 && (now - syncLastDispatchMs) < syncTrajectoryPeriodMs) {
-    return;
-  }
-
-  for (int t = 0; t < LINEAR_ACTUATORS; t++) {
-    TransmitCMD(SLAVE_FIRST + t, COMMAND::CMD_MOVE, syncTargets[t]);
-  }
-  syncTargetsPending = false;
-  syncLastDispatchMs = now;
-}
-
-void ParseTextCommandLine() {
-  static int32_t lastKp10 = -1;
-  static int32_t lastKi10 = -1;
-  static int32_t lastKd100 = -1;
-  static int32_t lastKs100 = -1;
-  static int32_t lastPidEnable = -1;
-  static int32_t lastPidBlend = -1;
-  static int32_t lastSyncExec = -1;
-
-  txtbuf[txtoffset] = '\0';
-  char* eq = strchr(txtbuf, '=');
-  if (!eq) {
-    return;
-  }
-  *eq = '\0';
-  const char* key = txtbuf;
-  const char* rawValue = eq + 1;
-  float value = (float)atof(rawValue);
-
-  if (EqualsIgnoreCase(key, "KP")) {
-    value = clamp(value, 0.0f, 200.0f);
-    int32_t v = (int32_t)(value * 10.0f + 0.5f);
-    if (v != lastKp10) {
-      lastKp10 = v;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_KP, (uint32_t)v);
-    }
-  } else if (EqualsIgnoreCase(key, "KI")) {
-    value = clamp(value, 0.0f, 50.0f);
-    int32_t v = (int32_t)(value * 10.0f + 0.5f);
-    if (v != lastKi10) {
-      lastKi10 = v;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_KI, (uint32_t)v);
-    }
-  } else if (EqualsIgnoreCase(key, "KD")) {
-    int32_t v = 0;
-    if (strchr(rawValue, '.') != nullptr) {
-      value = clamp(value, 0.0f, 50.0f);
-      v = (int32_t)(value * 100.0f + 0.5f);
-    } else {
-      int32_t scaled = atoi(rawValue);
-      v = clamp<int32_t>(scaled, 0, 100);
-    }
-    if (v != lastKd100) {
-      lastKd100 = v;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_KD, (uint32_t)v);
-    }
-  } else if (EqualsIgnoreCase(key, "KS")) {
-    value = clamp(value, 0.0f, 100.0f);
-    int32_t v = (int32_t)(value + 0.5f);
-    if (v != lastKs100) {
-      lastKs100 = v;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_KS, (uint32_t)v);
-    }
-  } else if (EqualsIgnoreCase(key, "PIDEN")) {
-    bool enabled = false;
-    if (EqualsIgnoreCase(eq + 1, "TRUE") || EqualsIgnoreCase(eq + 1, "ON")) {
-      enabled = true;
-    } else {
-      enabled = (value >= 0.5f);
-    }
-    int32_t v = enabled ? 1 : 0;
-    if (v != lastPidEnable) {
-      lastPidEnable = v;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_ENABLE, (uint32_t)v);
-    }
-  } else if (EqualsIgnoreCase(key, "PIDBLEND")) {
-    value = clamp(value, 0.0f, 100.0f);
-    int32_t v = (int32_t)(value + 0.5f);
-    if (v != lastPidBlend) {
-      lastPidBlend = v;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_BLEND, (uint32_t)v);
-    }
-  } else if (EqualsIgnoreCase(key, "PIDCFG")) {
-    char* comma = strchr(eq + 1, ',');
-    if (!comma) {
-      return;
-    }
-    *comma = '\0';
-    const char* enToken = eq + 1;
-    const char* blendToken = comma + 1;
-
-    int en = 0;
-    if (EqualsIgnoreCase(enToken, "TRUE") || EqualsIgnoreCase(enToken, "ON")) {
-      en = 1;
-    } else if (EqualsIgnoreCase(enToken, "FALSE") || EqualsIgnoreCase(enToken, "OFF")) {
-      en = 0;
-    } else {
-      en = (atof(enToken) >= 0.5f) ? 1 : 0;
-    }
-
-    int blend = clamp<int>((int)atoi(blendToken), 0, 100);
-
-    if (en != lastPidEnable) {
-      lastPidEnable = en;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_ENABLE, (uint32_t)en);
-      return;
-    }
-    if (blend != lastPidBlend) {
-      lastPidBlend = blend;
-      QueuePidTextCommand(COMMAND::CMD_SET_PID_BLEND, (uint32_t)blend);
-    }
-  } else if (EqualsIgnoreCase(key, "SYNCEXEC")) {
-    bool enabled = false;
-    if (EqualsIgnoreCase(eq + 1, "TRUE") || EqualsIgnoreCase(eq + 1, "ON")) {
-      enabled = true;
-    } else {
-      enabled = (value >= 0.5f);
-    }
-    int32_t v = enabled ? 1 : 0;
-    if (v != lastSyncExec) {
-      lastSyncExec = v;
-      syncTrajectoryEnabled = enabled;
-      if (enabled)
-        SET_FLAG(pid_state.flags, PID_FLAGS::PID_MASTER_SYNC);
-      else
-        CLEAR_FLAG(pid_state.flags, PID_FLAGS::PID_MASTER_SYNC);
-      syncTargetsPending = false;
-      syncLastDispatchMs = 0;
-    }
-  }
-}
 
 void serialEvent() {
   int data_cnt = std::min(Serial.available(), RAW_DATA_LEN);
@@ -591,17 +360,6 @@ void serialEvent() {
       if (byte == CMD_ID) {
         if (Serial.peek() == RAW_DATA_LEN) {
           buf[offset++] = CMD_ID;
-        }
-      } else if (byte == '\r' || byte == '\n') {
-        if (txtoffset > 0) {
-          ParseTextCommandLine();
-          txtoffset = 0;
-        }
-      } else if (byte >= 32 && byte <= 126) {
-        if (txtoffset < (sizeof(txtbuf) - 1)) {
-          txtbuf[txtoffset++] = (char)byte;
-        } else {
-          txtoffset = 0;
         }
       }
     }
@@ -629,11 +387,9 @@ void loop() {
   bool estopActive = (digitalRead(ALARM_PIN) == HIGH);
   if (estopActive) {
     estopLatched = true;
-    syncTargetsPending = false;
   }
 
   if (bAlarm || (estopActive && (millis() - lastAlarmBroadcastMs) > 100)) {
-    syncTargetsPending = false;
     for (int addr = SLAVE_FIRST; addr <= SLAVE_LAST; addr++)
       TransmitCMD(addr, COMMAND::SET_ALARM, 1);
     bAlarm = false;
@@ -642,22 +398,6 @@ void loop() {
 
   if (Serial.available())
     serialEvent();
-
-  if (syncTrajectoryEnabled) {
-    DispatchSynchronizedTargetsIfDue(false);
-  }
-
-  PrintPidDiagnosticsIfDue();
-
-  if (textCmdPending) {
-    if (!estopLatched) {
-      for (int t = 0; t < LINEAR_ACTUATORS; t++) {
-        TransmitCMD(SLAVE_FIRST + t, textPendingCmd, textPendingData);
-      }
-      UpdateMasterPidMirror(textPendingCmd, textPendingData);
-      textCmdPending = false;
-    }
-  }
 
   if (_bDataPresent) {
     digitalWrite(LED_PIN, LOW);  // Turn LED on
@@ -701,12 +441,8 @@ void loop() {
             val = (val >> 8) | (val << 8);
             mappedTargets[t] = map(val, 0, 65535, st[t].min, st[t].max);
           }
-          if (syncTrajectoryEnabled) {
-            QueueSynchronizedTargets(mappedTargets);
-          } else {
-            for (int t = 0; t < LINEAR_ACTUATORS; t++) {
-              TransmitCMD(SLAVE_FIRST + t, COMMAND::CMD_MOVE, (uint32_t)mappedTargets[t]);
-            }
+          for (int t = 0; t < LINEAR_ACTUATORS; t++) {
+            TransmitCMD(SLAVE_FIRST + t, COMMAND::CMD_MOVE, (uint32_t)mappedTargets[t]);
           }
         }
         break;
@@ -727,12 +463,8 @@ void loop() {
           if (estopLatched) {
             break;
           }
-          if (syncTrajectoryEnabled) {
-            QueueSynchronizedTargets(pccmd.data);
-          } else {
-            for (int t = 0; t < LINEAR_ACTUATORS; t++) {
-              TransmitCMD(SLAVE_FIRST + t, COMMAND::CMD_MOVE, pccmd.data[t]);
-            }
+          for (int t = 0; t < LINEAR_ACTUATORS; t++) {
+            TransmitCMD(SLAVE_FIRST + t, COMMAND::CMD_MOVE, pccmd.data[t]);
           }
         }
         break;
@@ -746,7 +478,6 @@ void loop() {
           if (estopLatched) {
             break;
           }
-          UpdateMasterPidMirror(pccmd.cmd, (uint32_t)pccmd.data[0]);
           // PID tuning values are applied globally to all actuators.
           for (int t = 0; t < LINEAR_ACTUATORS; t++) {
             TransmitCMD(SLAVE_FIRST + t, pccmd.cmd, pccmd.data[0]);
