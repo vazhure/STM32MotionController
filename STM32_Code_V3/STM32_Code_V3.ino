@@ -97,10 +97,10 @@ const T& clamp(const T& x, const T& a, const T& b) {
 #ifndef I2CMASTER
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Uncomment a single line with desired Address to flash SLAVE device
-//#define SLAVE_ADDR SLAVE_ADDR_FL
+#define SLAVE_ADDR SLAVE_ADDR_FL
 //#define SLAVE_ADDR SLAVE_ADDR_RL
 //#define SLAVE_ADDR SLAVE_ADDR_RR
-#define SLAVE_ADDR SLAVE_ADDR_FR
+//#define SLAVE_ADDR SLAVE_ADDR_FR
 #endif
 
 #define SERIAL_BAUD_RATE 115200
@@ -109,7 +109,7 @@ const T& clamp(const T& x, const T& a, const T& b) {
 #define SERIAL_TX_BUFFER_SIZE 512
 #define SERIAL_RX_BUFFER_SIZE 512
 
-#define LED_PIN PC13  //PB2  // PC13  // * Check your board. Some have PB2 or another (label near LED).
+#define LED_PIN PC13 //PB2  // PC13  // * Check your board. Some have PB2 or another (label near LED).
 
 enum MODE : uint8_t { UNKNOWN,
                       CONNECTED,
@@ -239,6 +239,34 @@ bool loadPidFromEEPROM() {
     ptr[i] = EEPROM.read(PID_EEPROM_ADDR + 1 + i);
   }
   return true;
+}
+
+void UpdateMasterPidMirror(uint8_t cmd, uint32_t data) {
+  switch (cmd) {
+    case COMMAND::CMD_SET_PID_KP:
+      pid_state.masterPidKp = clamp((float)data / 10.0f, 0.0f, 200.0f);
+      break;
+    case COMMAND::CMD_SET_PID_KI:
+      pid_state.masterPidKi = clamp((float)data / 10.0f, 0.0f, 50.0f);
+      break;
+    case COMMAND::CMD_SET_PID_KD:
+      pid_state.masterPidKd = clamp((float)data / 100.0f, 0.0f, 50.0f);
+      break;
+    case COMMAND::CMD_SET_PID_KS:
+      pid_state.masterPidKs = clamp((float)data / 100.0f, 0.0f, 1.0f);
+      break;
+    case COMMAND::CMD_SET_PID_ENABLE:
+      if (data != 0)
+        SET_FLAG(pid_state.flags, PID_FLAGS::PID_ENABLED);
+      else
+        CLEAR_FLAG(pid_state.flags, PID_FLAGS::PID_ENABLED);
+      break;
+    case COMMAND::CMD_SET_PID_BLEND:
+      pid_state.masterPidBlend = (uint16_t)data;
+      break;
+    default:
+      break;
+  }
 }
 
 bool TransmitCMD(uint8_t addr, uint8_t cmd, uint32_t data);
@@ -478,6 +506,7 @@ void loop() {
           if (estopLatched) {
             break;
           }
+          UpdateMasterPidMirror(pccmd.cmd, (uint32_t)pccmd.data[0]);
           // PID tuning values are applied globally to all actuators.
           for (int t = 0; t < LINEAR_ACTUATORS; t++) {
             TransmitCMD(SLAVE_FIRST + t, pccmd.cmd, pccmd.data[0]);
