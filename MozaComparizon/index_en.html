@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MozЯ X90 vs MOZA HMA150 — Motion Platform Showdown</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Russo+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --moza-red: #e60012;
+    --moza-dark: #1a1a1a;
+    --russian-gold: #d4af37;
+    --diy-green: #00ff88;
+    --diy-dark: #0d1f0d;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0d1f0d 100%);
+    min-height: 100vh;
+    padding: 20px;
+    font-family: 'Orbitron', sans-serif;
+    color: #fff;
+  }
+
+  .header {
+    text-align: center;
+    padding: 30px 0;
+    position: relative;
+  }
+
+  .vs-badge {
+    display: inline-block;
+    background: linear-gradient(45deg, var(--moza-red), #ff4444);
+    color: white;
+    font-size: 48px;
+    font-weight: 900;
+    padding: 10px 40px;
+    border-radius: 50%;
+    box-shadow: 0 0 30px rgba(230,0,18,0.5);
+    animation: pulse 2s infinite;
+    font-family: 'Russo One', sans-serif;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+  }
+
+  .title {
+    font-size: 42px;
+    margin: 20px 0;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 16px;
+    margin-bottom: 30px;
+  }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .product-card {
+    background: rgba(255,255,255,0.05);
+    border-radius: 20px;
+    padding: 25px;
+    border: 2px solid;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .product-card:hover {
+    transform: translateY(-5px);
+  }
+
+  .moza-card {
+    border-color: var(--moza-red);
+    box-shadow: 0 0 20px rgba(230,0,18,0.2);
+  }
+
+  .moza-card:hover {
+    box-shadow: 0 0 40px rgba(230,0,18,0.4);
+  }
+
+  .diy-card {
+    border-color: var(--diy-green);
+    box-shadow: 0 0 20px rgba(0,255,136,0.2);
+  }
+
+  .diy-card:hover {
+    box-shadow: 0 0 40px rgba(0,255,136,0.4);
+  }
+
+  .product-name {
+    font-size: 28px;
+    font-weight: 900;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+
+  .moza-name { color: var(--moza-red); }
+  .diy-name { 
+    color: var(--diy-green); 
+    font-family: 'Russo One', sans-serif;
+  }
+
+  .product-tagline {
+    text-align: center;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 20px;
+    font-style: italic;
+  }
+
+  .spec-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    margin: 8px 0;
+    border-radius: 10px;
+    background: rgba(0,0,0,0.3);
+    transition: all 0.3s;
+  }
+
+  .spec-row:hover {
+    background: rgba(255,255,255,0.1);
+  }
+
+  .spec-label {
+    font-size: 13px;
+    color: #aaa;
+  }
+
+  .spec-value {
+    font-weight: 700;
+    font-size: 14px;
+    text-align: right;
+  }
+
+  .moza-value { color: #ff6666; }
+  .diy-value { color: #66ffaa; }
+
+  .winner-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 15px;
+    font-size: 11px;
+    font-weight: 900;
+    margin-left: 8px;
+  }
+
+  .moza-winner {
+    background: var(--moza-red);
+    color: white;
+  }
+
+  .diy-winner {
+    background: var(--diy-green);
+    color: #000;
+  }
+
+  .center-divider {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+  }
+
+  .vs-text {
+    font-size: 64px;
+    font-weight: 900;
+    background: linear-gradient(45deg, var(--moza-red), var(--diy-green));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    filter: drop-shadow(0 0 10px rgba(255,255,255,0.3));
+  }
+
+  .price-tag {
+    font-size: 36px;
+    font-weight: 900;
+    padding: 15px 30px;
+    border-radius: 15px;
+    text-align: center;
+    margin: 20px 0;
+  }
+
+  .moza-price {
+    background: linear-gradient(135deg, #330000, #660000);
+    border: 2px solid var(--moza-red);
+    color: #ffaaaa;
+  }
+
+  .diy-price {
+    background: linear-gradient(135deg, #003300, #006600);
+    border: 2px solid var(--diy-green);
+    color: #aaffaa;
+  }
+
+  .price-note {
+    font-size: 12px;
+    color: #888;
+    margin-top: 5px;
+  }
+
+  .features-list {
+    margin-top: 20px;
+  }
+
+  .feature-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    font-size: 13px;
+  }
+
+  .feature-icon {
+    font-size: 18px;
+  }
+
+  .cta-section {
+    text-align: center;
+    margin-top: 40px;
+    padding: 30px;
+    background: rgba(0,255,136,0.05);
+    border-radius: 20px;
+    border: 1px dashed var(--diy-green);
+  }
+
+  .cta-title {
+    font-size: 24px;
+    color: var(--diy-green);
+    margin-bottom: 15px;
+  }
+
+  .github-links {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+
+  .github-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 25px;
+    background: #24292e;
+    color: white;
+    text-decoration: none;
+    border-radius: 10px;
+    font-size: 14px;
+    transition: all 0.3s;
+    border: 1px solid #444;
+  }
+
+  .github-btn:hover {
+    background: #2f363d;
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(0,255,136,0.3);
+  }
+
+  .footer-joke {
+    text-align: center;
+    margin-top: 40px;
+    padding: 20px;
+    color: #666;
+    font-size: 14px;
+    font-style: italic;
+  }
+
+  .meme-text {
+    font-family: 'Russo One', sans-serif;
+    font-size: 18px;
+    color: var(--russian-gold);
+    text-align: center;
+    margin: 15px 0;
+    text-shadow: 0 0 10px rgba(212,175,55,0.3);
+  }
+
+  .savings-banner {
+    background: linear-gradient(90deg, var(--diy-green), #00cc66);
+    color: #000;
+    padding: 15px 30px;
+    border-radius: 50px;
+    font-size: 20px;
+    font-weight: 900;
+    text-align: center;
+    margin: 30px auto;
+    max-width: 600px;
+    animation: glow 2s infinite alternate;
+  }
+
+  @keyframes glow {
+    from { box-shadow: 0 0 10px rgba(0,255,136,0.5); }
+    to { box-shadow: 0 0 30px rgba(0,255,136,0.8); }
+  }
+
+  .disclaimer {
+    text-align: center;
+    font-size: 11px;
+    color: #444;
+    margin-top: 20px;
+    padding: 10px;
+  }
+
+  .lang-switch {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 100;
+  }
+
+  .lang-switch a {
+    display: inline-block;
+    padding: 8px 16px;
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 13px;
+    border: 1px solid #444;
+    transition: all 0.3s;
+  }
+
+  .lang-switch a:hover {
+    background: rgba(0,255,136,0.2);
+    border-color: var(--diy-green);
+  }
+
+  @media (max-width: 900px) {
+    .comparison-grid {
+      grid-template-columns: 1fr;
+    }
+    .center-divider {
+      flex-direction: row;
+      padding: 20px 0;
+    }
+    .vs-text {
+      font-size: 40px;
+    }
+    .title {
+      font-size: 28px;
+    }
+    .price-tag {
+      font-size: 24px;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="lang-switch">
+    <a href="index.html">🇷🇺 Русский</a>
+  </div>
+
+  <div class="header">
+    <div class="vs-badge">BATTLE</div>
+    <h1 class="title">Motion Platform Showdown</h1>
+    <p class="subtitle">Corporate Giant vs. Garage Engineering</p>
+  </div>
+
+  <div class="comparison-grid">
+    <!-- MOZA HMA150 -->
+    <div class="product-card moza-card">
+      <div class="product-name moza-name">MOZA HMA150</div>
+      <div class="product-tagline">"Buy it and forget (about your money)"</div>
+
+      <div class="price-tag moza-price">
+        ~$3,000–$4,000
+        <div class="price-note">💸 Plus shipping, customs, taxes</div>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Platform Travel</span>
+        <span class="spec-value moza-value">150 mm <span class="winner-badge moza-winner">WIN</span></span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Speed</span>
+        <span class="spec-value moza-value">300 mm/s</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Acceleration</span>
+        <span class="spec-value moza-value">&gt; 1G</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Vibration</span>
+        <span class="spec-value moza-value">Up to 200 Hz</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Degrees of Freedom</span>
+        <span class="spec-value moza-value">3DOF (Pitch, Roll, Heave)</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Software</span>
+        <span class="spec-value moza-value">MOZA Motion Manager</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Source Code</span>
+        <span class="spec-value moza-value">❌ Closed Source</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">3D Printable Model</span>
+        <span class="spec-value moza-value">❌ None</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Supported Games</span>
+        <span class="spec-value moza-value">~30+ (MOZA limited)</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Warranty</span>
+        <span class="spec-value moza-value">✅ Yes</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Build Time</span>
+        <span class="spec-value moza-value">30 minutes</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Pride of Creation</span>
+        <span class="spec-value moza-value">❌ Zero</span>
+      </div>
+
+      <div class="features-list">
+        <div class="feature-item"><span class="feature-icon">🤖</span> AI Motion (whatever that means)</div>
+        <div class="feature-item"><span class="feature-icon">📦</span> Arrives in a box</div>
+        <div class="feature-item"><span class="feature-icon">🔒</span> Vendor lock-in forever</div>
+        <div class="feature-item"><span class="feature-icon">💳</span> Credit card friendly</div>
+      </div>
+    </div>
+
+    <!-- VS Divider -->
+    <div class="center-divider">
+      <div class="vs-text">VS</div>
+    </div>
+
+    <!-- MozЯ X90 -->
+    <div class="product-card diy-card">
+      <div class="product-name diy-name">MozЯ X90</div>
+      <div class="product-tagline">"Build it yourself, be proud forever"</div>
+
+      <div class="price-tag diy-price">
+        ~$800–$1,200
+        <div class="price-note">💚 Plus 47 evenings, sweat &amp; tears of joy</div>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Platform Travel</span>
+        <span class="spec-value diy-value">90 mm <span class="winner-badge diy-winner">90 — GOLDEN NUMBER</span></span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Speed</span>
+        <span class="spec-value diy-value">400 mm/s (adjustable)</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Acceleration</span>
+        <span class="spec-value diy-value">Enough to eject you from the seat</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Vibration</span>
+        <span class="spec-value diy-value">Servo vibrates by itself, bonus!</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Degrees of Freedom</span>
+        <span class="spec-value diy-value">3DOF + freedom to tinker</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Software</span>
+        <span class="spec-value diy-value">vAzhure Racing Hub <span class="winner-badge diy-winner">FREE</span></span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Source Code</span>
+        <span class="spec-value diy-value">✅ Fully Open Source</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">3D Printable Model</span>
+        <span class="spec-value diy-value">✅ On Printables.com</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Supported Games</span>
+        <span class="spec-value diy-value">40+ and growing <span class="winner-badge diy-winner">MORE</span></span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Warranty</span>
+        <span class="spec-value diy-value">🛠️ You ARE the warranty</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Build Time</span>
+        <span class="spec-value diy-value">2–3 weekends + swearing</span>
+      </div>
+
+      <div class="spec-row">
+        <span class="spec-label">Pride of Creation</span>
+        <span class="spec-value diy-value">✅ OFF THE CHARTS <span class="winner-badge diy-winner">MAX</span></span>
+      </div>
+
+      <div class="features-list">
+        <div class="feature-item"><span class="feature-icon">🔧</span> Full hardware control</div>
+        <div class="feature-item"><span class="feature-icon">🧠</span> STM32F103C8T6 (clone, but works!)</div>
+        <div class="feature-item"><span class="feature-icon">🖨️</span> Print as many as you want</div>
+        <div class="feature-item"><span class="feature-icon">🎮</span> Assetto Corsa, DCS, X-Plane, iRacing, BeamNG...</div>
+        <div class="feature-item"><span class="feature-icon">💪</span> 750W servo motors × 4</div>
+        <div class="feature-item"><span class="feature-icon">🔌</span> Mouse USB cables for end stops</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="savings-banner">
+    💰 SAVINGS: ~$2,500 — THAT'S 5 SETS OF DRIFT TIRES! 💰
+  </div>
+
+  <div class="meme-text">
+    "150 mm of travel is for people who can't feel the road.<br>
+    90 mm is for real pilots."
+  </div>
+
+  <div class="cta-section">
+    <div class="cta-title">🛠️ Want to build your own MozЯ X90?</div>
+    <p style="color: #aaa; margin-bottom: 20px;">Everything is free. Everything is open. Everything is ours.</p>
+
+    <div class="github-links">
+      <a href="https://github.com/vazhure/vAzhureRacingHub" target="_blank" class="github-btn">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        vAzhure Racing Hub
+      </a>
+      <a href="https://github.com/vazhure/STM32MotionController" target="_blank" class="github-btn">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        STM32 Controller
+      </a>
+      <a href="https://www.printables.com/model/1407669-servo-linear-actuator-for-motion-platforms" target="_blank" class="github-btn">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        3D Model on Printables
+      </a>
+    </div>
+
+    <p style="color: #666; margin-top: 20px; font-size: 13px;">
+      Discord: <a href="https://discord.gg/ynHCkrsmMA" style="color: #7289da;">discord.gg/ynHCkrsmMA</a>
+    </p>
+  </div>
+
+  <div class="footer-joke">
+    <p>⚠️ MozЯ X90 is not endorsed by MOZA Racing. Nor condemned. It just exists. As it should.</p>
+    <p style="margin-top: 10px;">🪆 "In Russia, you don't buy a motion platform — you build one."</p>
+  </div>
+
+  <div class="disclaimer">
+    * All MozЯ X90 specs are approximate and depend on build quality, servo tuning, and amount of beer consumed during assembly.<br>
+    * MOZA HMA150 is a trademark of MOZA Racing. We respect them for motivating people to build their own.<br>
+    * Prices are approximate and may vary by region and exchange rate.
+  </div>
+</body>
+</html>
