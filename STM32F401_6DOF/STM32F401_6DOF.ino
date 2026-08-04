@@ -1,17 +1,23 @@
-// !!!!!! W.I.P. !!!!!
-//
-// 6DOF by Andrey Zhuravlev
-// STM32F401_6DOF.ino
+// =============================================================================
 // 6DOF Stewart platform synchronized STEP/DIR controller
-// STM32F401 + 6 stepper axes + USB serial protocol
+// Target: STM32F401 / STM32F411 Black Pill boards
+// Developer: Andrey Zhuravlev
+// Email: v.azhure@gmail.com
+// Discord: https://discord.gg/ynHCkrsmMA
+//
+// Changelog:
+// 2026-08-04 v0.1.1
+// - Fixed struct packing attribute.
+// - Updated to work with synchronized parallel homing HAL.
+// =============================================================================
 
 #include "dma_stepper_hal.h"
 #include <string.h>
 
 // =============================================================================
-// PIN MAP FOR STM32F401 BLACK PILL
+// PIN MAP FOR STM32F401/F411 BLACK PILL
 // Adjust pins for your exact board/wiring.
-// Avoid PA11/PA12 because they are USB on F401.
+// Avoid PA11/PA12 because they are USB on F401/F411.
 // =============================================================================
 
 #define AXIS0_STEP   PA0
@@ -44,7 +50,7 @@
 // PROTOCOL CONSTANTS
 // =============================================================================
 
-#define SERIAL_BAUD_RATE 115200 
+#define SERIAL_BAUD_RATE 115200
 
 #define PKT_SYNC0 0xA5
 #define PKT_SYNC1 0x5A
@@ -70,32 +76,32 @@
 // =============================================================================
 
 struct HostPacket {
-  uint8_t sync0;
-  uint8_t sync1;
-  uint8_t type;
-  uint8_t seq;
-  uint32_t frame_us;
-  int32_t data[NUM_AXES];
-  uint16_t crc;
+    uint8_t sync0;
+    uint8_t sync1;
+    uint8_t type;
+    uint8_t seq;
+    uint32_t frame_us;
+    int32_t data[NUM_AXES];
+    uint16_t crc;
 } __attribute__((packed));
 
 #define HOST_PACKET_SIZE sizeof(HostPacket)
 
 struct StatePacket {
-  uint8_t sync0;
-  uint8_t sync1;
-  uint8_t type;
-  uint8_t seq;
+    uint8_t sync0;
+    uint8_t sync1;
+    uint8_t type;
+    uint8_t seq;
 
-  uint8_t mode;
-  uint8_t error;
-  uint8_t queueCount;
-  uint8_t flags;
+    uint8_t mode;
+    uint8_t error;
+    uint8_t queueCount;
+    uint8_t flags;
 
-  int32_t pos[NUM_AXES];
-  int32_t target[NUM_AXES];
+    int32_t pos[NUM_AXES];
+    int32_t target[NUM_AXES];
 
-  uint16_t crc;
+    uint16_t crc;
 } __attribute__((packed));
 
 #define STATE_PACKET_SIZE sizeof(StatePacket)
@@ -119,21 +125,21 @@ static uint32_t droppedFrames = 0;
 // =============================================================================
 
 static uint16_t crc16_ccitt(const uint8_t* data, size_t len) {
-  uint16_t crc = 0xFFFF;
+    uint16_t crc = 0xFFFF;
 
-  for (size_t i = 0; i < len; i++) {
-    crc ^= (uint16_t)data[i] << 8;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= (uint16_t)data[i] << 8;
 
-    for (uint8_t b = 0; b < 8; b++) {
-      if (crc & 0x8000) {
-        crc = (uint16_t)((crc << 1) ^ 0x1021);
-      } else {
-        crc = (uint16_t)(crc << 1);
-      }
+        for (uint8_t b = 0; b < 8; b++) {
+            if (crc & 0x8000) {
+                crc = (uint16_t)((crc << 1) ^ 0x1021);
+            } else {
+                crc = (uint16_t)(crc << 1);
+            }
+        }
     }
-  }
 
-  return crc;
+    return crc;
 }
 
 // =============================================================================
@@ -141,27 +147,28 @@ static uint16_t crc16_ccitt(const uint8_t* data, size_t len) {
 // =============================================================================
 
 void sendState() {
-  StatePacket s;
+    StatePacket s;
 
-  s.sync0 = PKT_SYNC0;
-  s.sync1 = PKT_SYNC1;
-  s.type = PKT_STATE;
-  s.seq = txSeq++;
+    s.sync0 = PKT_SYNC0;
+    s.sync1 = PKT_SYNC1;
+    s.type = PKT_STATE;
+    s.seq = txSeq++;
 
-  s.mode = DMAStepper_GetMode();
-  s.error = DMAStepper_GetError();
-  s.queueCount = DMAStepper_GetQueueCount();
+    s.mode = DMAStepper_GetMode();
+    s.error = DMAStepper_GetError();
+    s.queueCount = DMAStepper_GetQueueCount();
 
-  s.flags = 0;
-  if (DMAStepper_IsHomed()) s.flags |= FLAG_HOMED;
-  if (DMAStepper_IsSegmentActive()) s.flags |= FLAG_SEGMENT_ACTIVE;
+    s.flags = 0;
 
-  DMAStepper_GetPositions(s.pos);
-  DMAStepper_GetTargets(s.target);
+    if (DMAStepper_IsHomed()) s.flags |= FLAG_HOMED;
+    if (DMAStepper_IsSegmentActive()) s.flags |= FLAG_SEGMENT_ACTIVE;
 
-  s.crc = crc16_ccitt((const uint8_t*)&s, STATE_PACKET_SIZE - sizeof(uint16_t));
+    DMAStepper_GetPositions(s.pos);
+    DMAStepper_GetTargets(s.target);
 
-  Serial.write((const uint8_t*)&s, STATE_PACKET_SIZE);
+    s.crc = crc16_ccitt((const uint8_t*)&s, STATE_PACKET_SIZE - sizeof(uint16_t));
+
+    Serial.write((const uint8_t*)&s, STATE_PACKET_SIZE);
 }
 
 // =============================================================================
@@ -169,84 +176,84 @@ void sendState() {
 // =============================================================================
 
 void handlePacket(const HostPacket& pkt) {
-  DMAStepper_NotifyValidPacket();
+    DMAStepper_NotifyValidPacket();
 
-  if (pkt.type == PKT_TARGET_FRAME) {
-    if (!DMAStepper_QueueFrame(pkt.data, pkt.frame_us, pkt.seq)) {
-      droppedFrames++;
+    if (pkt.type == PKT_TARGET_FRAME) {
+        if (!DMAStepper_QueueFrame(pkt.data, pkt.frame_us, pkt.seq)) {
+            droppedFrames++;
+        }
+    } else if (pkt.type == PKT_COMMAND) {
+        int32_t cmd = pkt.data[0];
+
+        switch (cmd) {
+            case HOST_CMD_HOME:
+                DMAStepper_StartHoming();
+                break;
+
+            case HOST_CMD_ENABLE:
+                DMAStepper_Enable(true);
+                break;
+
+            case HOST_CMD_DISABLE:
+                DMAStepper_Enable(false);
+                break;
+
+            case HOST_CMD_CLEAR_ALARM:
+                DMAStepper_ClearAlarm();
+                break;
+
+            case HOST_CMD_SET_HOME:
+                DMAStepper_SetHome();
+                break;
+
+            case HOST_CMD_GET_STATE:
+                break;
+
+            default:
+                break;
+        }
+
+        sendState();
     }
-  } else if (pkt.type == PKT_COMMAND) {
-    int32_t cmd = pkt.data[0];
-
-    switch (cmd) {
-      case HOST_CMD_HOME:
-        DMAStepper_StartHoming();
-        break;
-
-      case HOST_CMD_ENABLE:
-        DMAStepper_Enable(true);
-        break;
-
-      case HOST_CMD_DISABLE:
-        DMAStepper_Enable(false);
-        break;
-
-      case HOST_CMD_CLEAR_ALARM:
-        DMAStepper_ClearAlarm();
-        break;
-
-      case HOST_CMD_SET_HOME:
-        DMAStepper_SetHome();
-        break;
-
-      case HOST_CMD_GET_STATE:
-        break;
-
-      default:
-        break;
-    }
-
-    sendState();
-  }
 }
 
 void readSerial() {
-  while (Serial.available()) {
-    uint8_t b = (uint8_t)Serial.read();
+    while (Serial.available()) {
+        uint8_t b = (uint8_t)Serial.read();
 
-    if (rxLen == 0) {
-      if (b == PKT_SYNC0) {
-        rxBuf[0] = b;
-        rxLen = 1;
-      }
-    } else if (rxLen == 1) {
-      if (b == PKT_SYNC1) {
-        rxBuf[1] = b;
-        rxLen = 2;
-      } else if (b == PKT_SYNC0) {
-        rxBuf[0] = b;
-        rxLen = 1;
-      } else {
-        rxLen = 0;
-      }
-    } else {
-      rxBuf[rxLen++] = b;
+        if (rxLen == 0) {
+            if (b == PKT_SYNC0) {
+                rxBuf[0] = b;
+                rxLen = 1;
+            }
+        } else if (rxLen == 1) {
+            if (b == PKT_SYNC1) {
+                rxBuf[1] = b;
+                rxLen = 2;
+            } else if (b == PKT_SYNC0) {
+                rxBuf[0] = b;
+                rxLen = 1;
+            } else {
+                rxLen = 0;
+            }
+        } else {
+            rxBuf[rxLen++] = b;
 
-      if (rxLen == HOST_PACKET_SIZE) {
-        rxLen = 0;
+            if (rxLen == HOST_PACKET_SIZE) {
+                rxLen = 0;
 
-        HostPacket pkt;
-        memcpy(&pkt, rxBuf, HOST_PACKET_SIZE);
+                HostPacket pkt;
+                memcpy(&pkt, rxBuf, HOST_PACKET_SIZE);
 
-        uint16_t expected = pkt.crc;
-        uint16_t computed = crc16_ccitt((const uint8_t*)&pkt, HOST_PACKET_SIZE - sizeof(uint16_t));
+                uint16_t expected = pkt.crc;
+                uint16_t computed = crc16_ccitt((const uint8_t*)&pkt, HOST_PACKET_SIZE - sizeof(uint16_t));
 
-        if (expected == computed) {
-          handlePacket(pkt);
+                if (expected == computed) {
+                    handlePacket(pkt);
+                }
+            }
         }
-      }
     }
-  }
 }
 
 // =============================================================================
@@ -254,55 +261,60 @@ void readSerial() {
 // =============================================================================
 
 void setup() {
-  Serial.begin(SERIAL_BAUD_RATE);
+    Serial.begin(SERIAL_BAUD_RATE);
 
-  uint32_t start = millis();
-  while (!Serial && (millis() - start) < 3000) {
-    // Wait up to 3 seconds for USB CDC.
-  }
+    uint32_t start = millis();
 
-  pinMode(LED_PIN, OUTPUT);
+    while (!Serial && (millis() - start) < 3000) {
+        // Wait up to 3 seconds for USB CDC.
+    }
 
-  DMAStepper_Init();
+    pinMode(LED_PIN, OUTPUT);
 
-  DMAStepper_InitAxis(0, AXIS0_STEP, AXIS0_DIR, AXIS0_LIMIT);
-  DMAStepper_InitAxis(1, AXIS1_STEP, AXIS1_DIR, AXIS1_LIMIT);
-  DMAStepper_InitAxis(2, AXIS2_STEP, AXIS2_DIR, AXIS2_LIMIT);
-  DMAStepper_InitAxis(3, AXIS3_STEP, AXIS3_DIR, AXIS3_LIMIT);
-  DMAStepper_InitAxis(4, AXIS4_STEP, AXIS4_DIR, AXIS4_LIMIT);
-  DMAStepper_InitAxis(5, AXIS5_STEP, AXIS5_DIR, AXIS5_LIMIT);
+    DMAStepper_Init();
 
-  // Start in enabled but not homed state.
-  DMAStepper_Enable(true);
+    DMAStepper_InitAxis(0, AXIS0_STEP, AXIS0_DIR, AXIS0_LIMIT);
+    DMAStepper_InitAxis(1, AXIS1_STEP, AXIS1_DIR, AXIS1_LIMIT);
+    DMAStepper_InitAxis(2, AXIS2_STEP, AXIS2_DIR, AXIS2_LIMIT);
+    DMAStepper_InitAxis(3, AXIS3_STEP, AXIS3_DIR, AXIS3_LIMIT);
+    DMAStepper_InitAxis(4, AXIS4_STEP, AXIS4_DIR, AXIS4_LIMIT);
+    DMAStepper_InitAxis(5, AXIS5_STEP, AXIS5_DIR, AXIS5_LIMIT);
 
-  digitalWrite(LED_PIN, HIGH);
+    // Start in enabled but not homed state.
+    DMAStepper_Enable(true);
+
+    digitalWrite(LED_PIN, HIGH);
 }
 
 void loop() {
-  readSerial();
-  DMAStepper_Process();
+    readSerial();
+    DMAStepper_Process();
 
-  static uint32_t lastStateMs = 0;
-  static uint32_t lastLedMs = 0;
+    static uint32_t lastStateMs = 0;
+    static uint32_t lastLedMs = 0;
 
-  uint32_t now = millis();
+    uint32_t now = millis();
 
 #if AUTO_STATE_PERIOD_MS > 0
-  if (now - lastStateMs >= AUTO_STATE_PERIOD_MS) {
-    lastStateMs = now;
-    sendState();
-  }
+    if (now - lastStateMs >= AUTO_STATE_PERIOD_MS) {
+        lastStateMs = now;
+        sendState();
+    }
 #endif
 
-  uint8_t mode = DMAStepper_GetMode();
-  uint32_t ledPeriod = 1000;
+    uint8_t mode = DMAStepper_GetMode();
+    uint32_t ledPeriod = 1000;
 
-  if (mode == MODE_ALARM) ledPeriod = 80;
-  else if (mode == MODE_HOMING) ledPeriod = 250;
-  else if (mode == MODE_RUNNING) ledPeriod = 500;
+    if (mode == MODE_ALARM) {
+        ledPeriod = 80;
+    } else if (mode == MODE_HOMING) {
+        ledPeriod = 250;
+    } else if (mode == MODE_RUNNING) {
+        ledPeriod = 500;
+    }
 
-  if (now - lastLedMs >= ledPeriod) {
-    lastLedMs = now;
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-  }
+    if (now - lastLedMs >= ledPeriod) {
+        lastLedMs = now;
+        digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    }
 }
