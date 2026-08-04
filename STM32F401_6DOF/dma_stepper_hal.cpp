@@ -5,6 +5,10 @@
 // Discord: https://discord.gg/ynHCkrsmMA
 //
 // Changelog:
+// 2026-08-04 v0.1.2
+// - Added runtime enforcement of MAX_PULSE_HZ inside segment loader.
+// - MAX_PULSE_HZ is calculated in dma_stepper_hal.h from speed, driver,
+//   controller, and pulse-width limits.
 // 2026-08-04 v0.1.1
 // - Implemented synchronized parallel homing state machine.
 // - All axes move to zero endstops simultaneously.
@@ -347,14 +351,29 @@ static bool loadNextSegment(void) {
         // Segment length must be even because step pulses use high/low ticks.
         if (ticks & 1) ticks++;
 
-        // Because one step needs high tick + low tick,
-        // minimum segment length for maxSteps is maxSteps * 2 ticks.
+        // Minimum ticks required by step pulse timing:
+        // one full step requires at least HIGH tick + LOW tick.
         uint32_t minTicks = maxSteps * 2UL;
+
+        // Additional safety limit from MAX_PULSE_HZ.
+        // This enforces user/driver/controller speed limit even if
+        // a frame was queued before limit validation or manually injected.
+        uint64_t speedTicks64 = ((uint64_t)maxSteps * ISR_TICK_HZ) / MAX_PULSE_HZ;
+
+        if (speedTicks64 < 2) speedTicks64 = 2;
+        if (speedTicks64 > 0xFFFFFFFEULL) speedTicks64 = 0xFFFFFFFEULL;
+
+        uint32_t speedTicks = (uint32_t)speedTicks64;
 
         if (ticks < minTicks) {
             ticks = minTicks;
-            if (ticks & 1) ticks++;
         }
+
+        if (ticks < speedTicks) {
+            ticks = speedTicks;
+        }
+
+        if (ticks & 1) ticks++;
 
         segTicks = ticks;
         segSlots = ticks / 2UL;
@@ -425,7 +444,7 @@ void DMAStepper_Init(void) {
     // If your core variant wants TIMER_CH1 instead of 1, replace 1 by TIMER_CH1.
     sharedTimer->setMode(1, TIMER_OUTPUT_COMPARE);
 
-    // Request 100 kHz update interrupt.
+    // Request ISR_TICK_HZ update interrupt.
     sharedTimer->setOverflow(ISR_TICK_HZ, HERTZ_FORMAT);
     sharedTimer->attachInterrupt(1, stepperTimerISR);
 

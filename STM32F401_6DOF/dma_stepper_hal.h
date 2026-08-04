@@ -6,6 +6,13 @@
 // Discord: https://discord.gg/ynHCkrsmMA
 //
 // Changelog:
+// 2026-08-04 v0.1.2
+// - Added user speed limit MAX_SPEED_MM_S.
+// - Added driver maximum step frequency limit DRIVER_MAX_PULSE_HZ.
+// - Added driver minimum STEP pulse width limits.
+// - Added controller ISR safety limit and pulse-width validation.
+// - MAX_PULSE_HZ is now automatically limited by the safest constraint.
+// - Added optional STRICT_SPEED_CHECK compile-time validation.
 // 2026-08-04 v0.1.1
 // - Added synchronized parallel homing for all axes.
 // - Each axis stops individually when its own limit switch is triggered.
@@ -28,17 +35,201 @@
 // Number of physical actuators.
 #define NUM_AXES 6
 
-// Mechanical parameters.
-#define MM_PER_REV        10.0f     // Millimeters per motor revolution, adjust.
-#define STEPS_PER_REV     1000      // Microsteps per revolution, adjust.
-#define STROKE_MM         400.0f    // Actuator usable stroke, adjust.
+// =============================================================================
+// MECHANICAL PARAMETERS (REQUIRED)
+// =============================================================================
 
+// Millimeters per motor revolution.
+// Adjust to your actuator screw / gearbox.
+#define MM_PER_REV        10.0f
+
+// Microsteps per motor revolution.
+// Example: 200 steps motor with 5x microstepping = 1000.
+#define STEPS_PER_REV     1000
+
+// Usable actuator stroke in millimeters.
+#define STROKE_MM         400.0f
+
+// Derived mechanical constants.
 #define MM_PER_STEP       (MM_PER_REV / (float)STEPS_PER_REV)
 #define STEPS_PER_MM      ((float)STEPS_PER_REV / MM_PER_REV)
 
 // Absolute position limits in steps after homing / SET_HOME.
 #define MIN_POS_STEPS     0
 #define MAX_POS_STEPS     ((int32_t)(STROKE_MM * STEPS_PER_MM))
+
+// =============================================================================
+// TIMER / CONTROLLER LIMITS (REQUIRED)
+// =============================================================================
+
+// Timer tick frequency.
+// Current step generation uses:
+// one tick STEP HIGH + one tick STEP LOW.
+// Therefore maximum full-step frequency = ISR_TICK_HZ / 2.
+//
+// Example:
+// ISR_TICK_HZ = 100000 -> tick = 10 us -> max full step frequency = 50 kHz.
+#define ISR_TICK_HZ       100000UL
+
+// Maximum safe interrupt rate for this firmware/MCU.
+// For STM32F401/F411 with 6 axes, 100 kHz is safe.
+// 200 kHz may be possible but must be tested carefully.
+#define CONTROLLER_MAX_SAFE_ISR_HZ 200000UL
+
+// =============================================================================
+// DRIVER LIMITS (REQUIRED)
+// =============================================================================
+
+// Maximum STEP input frequency supported by the stepper driver.
+// Example: many drivers support up to 200 kHz.
+// This is an absolute driver limit, regardless of MCU capabilities.
+#define DRIVER_MAX_PULSE_HZ 200000UL
+
+// Minimum STEP pulse HIGH time required by the driver, microseconds.
+// Check driver datasheet.
+// Common values: 1 us, 2.5 us, 5 us.
+#define DRIVER_STEP_PULSE_MIN_HIGH_US 5.0f
+
+// Minimum STEP pulse LOW time required by the driver, microseconds.
+// Check driver datasheet.
+// Common values: 1 us, 2.5 us, 5 us.
+#define DRIVER_STEP_PULSE_MIN_LOW_US  5.0f
+
+// =============================================================================
+// SPEED LIMIT CONFIGURATION (REQUIRED)
+// =============================================================================
+
+// Desired maximum actuator linear speed in millimeters per second.
+// This is the user-defined mechanical speed limit.
+#define MAX_SPEED_MM_S    150.0f
+
+// If STRICT_SPEED_CHECK = 1, compilation will fail if MAX_SPEED_MM_S
+// exceeds controller, driver, or pulse-width capabilities.
+//
+// If STRICT_SPEED_CHECK = 0, MAX_PULSE_HZ will be silently clamped
+// to the safest possible value.
+#define STRICT_SPEED_CHECK 1
+
+// =============================================================================
+// DERIVED SPEED / PULSE LIMITS
+// =============================================================================
+
+// Helper macro for compile-time minimum selection.
+#define MIN_U32(a, b) ((a) < (b) ? (a) : (b))
+
+// Step frequency required for MAX_SPEED_MM_S.
+// Formula:
+// steps/s = mm/s * steps/mm
+#define REQUESTED_SPEED_PULSE_HZ \
+    ((uint32_t)(MAX_SPEED_MM_S * STEPS_PER_MM))
+
+// Hardware limit caused by ISR step generation.
+// One full step requires two ISR ticks: HIGH tick + LOW tick.
+#define CONTROLLER_MAX_STEP_HZ \
+    ((uint32_t)(ISR_TICK_HZ / 2UL))
+
+// Driver pulse-width limit.
+// Minimum full step period = HIGH time + LOW time.
+#define DRIVER_STEP_PULSE_PERIOD_US \
+    (DRIVER_STEP_PULSE_MIN_HIGH_US + DRIVER_STEP_PULSE_MIN_LOW_US)
+
+// Maximum frequency allowed by required pulse width.
+// If period is zero or invalid, return a very large value and let
+// static assertions report the invalid pulse width settings.
+#define DRIVER_PULSE_WIDTH_MAX_HZ \
+    ((DRIVER_STEP_PULSE_PERIOD_US <= 0.0f) \
+        ? 0xFFFFFFFFUL \
+        : ((uint32_t)(1000000.0f / DRIVER_STEP_PULSE_PERIOD_US)))
+
+// Absolute allowed maximum pulse frequency.
+// It is the lowest of:
+// - driver maximum step frequency;
+// - controller ISR generation limit;
+// - driver pulse-width limit.
+#define MAX_ALLOWED_PULSE_HZ \
+    MIN_U32( \
+        MIN_U32(DRIVER_MAX_PULSE_HZ, CONTROLLER_MAX_STEP_HZ), \
+        DRIVER_PULSE_WIDTH_MAX_HZ \
+    )
+
+// Final maximum pulse frequency used by motion execution.
+// It cannot exceed requested user speed and absolute allowed maximum.
+#define MAX_PULSE_HZ \
+    MIN_U32(REQUESTED_SPEED_PULSE_HZ, MAX_ALLOWED_PULSE_HZ)
+
+// =============================================================================
+// COMPILE-TIME VALIDATION
+// =============================================================================
+
+// Helper nanosecond constants for integer static assertions.
+#define ISR_TICK_PERIOD_NS \
+    ((uint32_t)(1000000000.0f / (float)ISR_TICK_HZ))
+
+#define DRIVER_STEP_PULSE_MIN_HIGH_NS \
+    ((uint32_t)(DRIVER_STEP_PULSE_MIN_HIGH_US * 1000.0f))
+
+#define DRIVER_STEP_PULSE_MIN_LOW_NS \
+    ((uint32_t)(DRIVER_STEP_PULSE_MIN_LOW_US * 1000.0f))
+
+static_assert(ISR_TICK_HZ > 0,
+    "ISR_TICK_HZ must be greater than zero.");
+
+static_assert(CONTROLLER_MAX_SAFE_ISR_HZ > 0,
+    "CONTROLLER_MAX_SAFE_ISR_HZ must be greater than zero.");
+
+static_assert(ISR_TICK_HZ <= CONTROLLER_MAX_SAFE_ISR_HZ,
+    "ISR_TICK_HZ exceeds CONTROLLER_MAX_SAFE_ISR_HZ. "
+    "Reduce ISR_TICK_HZ or increase CONTROLLER_MAX_SAFE_ISR_HZ if safe.");
+
+static_assert(DRIVER_STEP_PULSE_MIN_HIGH_NS > 0,
+    "DRIVER_STEP_PULSE_MIN_HIGH_US must be greater than zero.");
+
+static_assert(DRIVER_STEP_PULSE_MIN_LOW_NS > 0,
+    "DRIVER_STEP_PULSE_MIN_LOW_US must be greater than zero.");
+
+static_assert(ISR_TICK_PERIOD_NS >= DRIVER_STEP_PULSE_MIN_HIGH_NS,
+    "STEP pulse HIGH width is too short. "
+    "Reduce ISR_TICK_HZ or use a driver with shorter minimum HIGH pulse.");
+
+static_assert(ISR_TICK_PERIOD_NS >= DRIVER_STEP_PULSE_MIN_LOW_NS,
+    "STEP pulse LOW width is too short. "
+    "Reduce ISR_TICK_HZ or use a driver with shorter minimum LOW pulse.");
+
+static_assert(DRIVER_MAX_PULSE_HZ > 0,
+    "DRIVER_MAX_PULSE_HZ must be greater than zero.");
+
+static_assert(MAX_ALLOWED_PULSE_HZ > 0,
+    "MAX_ALLOWED_PULSE_HZ must be greater than zero.");
+
+static_assert(MAX_PULSE_HZ > 0,
+    "MAX_PULSE_HZ must be greater than zero.");
+
+#if STRICT_SPEED_CHECK
+static_assert(REQUESTED_SPEED_PULSE_HZ <= MAX_ALLOWED_PULSE_HZ,
+    "MAX_SPEED_MM_S exceeds controller/driver/pulse-width capability. "
+    "Reduce MAX_SPEED_MM_S, reduce microstepping, increase ISR_TICK_HZ safely, "
+    "or set STRICT_SPEED_CHECK to 0 to clamp automatically.");
+#endif
+
+// =============================================================================
+// FRAME / INTERPOLATION SETTINGS
+// =============================================================================
+
+// Frame timing limits.
+#define MIN_FRAME_US      1000UL        // 1 ms
+#define MAX_FRAME_US      1000000UL     // 1000 ms
+#define DEFAULT_FRAME_US  10000UL       // 10 ms = 100 Hz
+
+// Direction setup delay before first step of a segment, in timer ticks.
+#define DIR_SETTLE_TICKS  4UL
+
+// Frame queue length.
+// Small queue gives low latency; large queue smooths USB jitter.
+#define FRAME_QUEUE_LEN   8
+
+// =============================================================================
+// HOMING SETTINGS
+// =============================================================================
 
 // Uncomment this line to disable limit switches.
 // In this mode the controller assumes that all actuators are already at the
@@ -60,6 +251,7 @@
 #define HOMING_RETRACT_DIRECTION true
 
 // Homing speed in steps per second.
+// Must not exceed MAX_PULSE_HZ.
 #define HOMING_FREQUENCY_HZ 1000UL
 
 // Distance to move away from the limit switch or mechanical hard stop.
@@ -77,27 +269,9 @@
 #define HOMING_SEEK_OVERFLOW_STEPS \
     ((int32_t)((float)MAX_POS_STEPS * HOMING_OVERFLOW_LIMIT_MULT))
 
-// =============================================================================
-// INTERPOLATION TIMER SETTINGS
-// =============================================================================
-
-// Timer tick frequency.
-// Step pulse is high one tick and low one tick.
-// Therefore max step frequency per axis = ISR_TICK_HZ / 2.
-#define ISR_TICK_HZ       100000UL
-#define MAX_PULSE_HZ      50000UL
-
-// Frame timing limits.
-#define MIN_FRAME_US      1000UL        // 1 ms
-#define MAX_FRAME_US      1000000UL     // 1000 ms
-#define DEFAULT_FRAME_US  10000UL       // 10 ms = 100 Hz
-
-// Direction setup delay before first step of a segment, in timer ticks.
-#define DIR_SETTLE_TICKS  4UL
-
-// Frame queue length.
-// Small queue gives low latency; large queue smooths USB jitter.
-#define FRAME_QUEUE_LEN   8
+static_assert(HOMING_FREQUENCY_HZ <= MAX_PULSE_HZ,
+    "HOMING_FREQUENCY_HZ exceeds MAX_PULSE_HZ. "
+    "Reduce HOMING_FREQUENCY_HZ or increase allowed speed limits.");
 
 // =============================================================================
 // SAFETY SETTINGS
