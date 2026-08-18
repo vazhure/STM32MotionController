@@ -1,0 +1,29 @@
+┌──────────────────┐                    ┌───────────────────┐
+│   MASTER F103C8         │                    │    SLAVE F103C8         │
+│   (Logical axes 0-2)    │                    │    (Logical axes 3-5)   │
+│   USB ↔ PC              │                    │                          │
+│                         │                    │                          │
+│  ─── Stepper outputs ─│                    │  ─── Stepper outputs ───│
+│  AXIS0: PA0/PA1/PB10    │                    │  AXIS0: PA0/PA1/PB10    │
+│  AXIS1: PA2/PA3/PA8     │                    │  AXIS1: PA2/PA3/PA8     │
+│  AXIS2: PB3/PB4/PB5     │                    │  AXIS2: PB3/PB4/PB5     │
+│                         │                    │                          │
+│  ─── SPI interconnect ─│                    │                          │
+│  PA5  (SCK)    ───────┼──────────────┼─── PA5  (SCK)           │
+│  PA6  (MISO)   ◄──────┼──────────────┼─── PA6  (MISO)          │
+│  PA7  (MOSI)   ───────┼──────────────┼─── PA7  (MOSI)          │
+│  PA4  (NSS/CS) ───────┼──────────────┼─── PA4  (NSS/CS)        │
+│  PB0  (SYNC)   ───────┼──────────────┼─── PB0  (SYNC)          │
+│  PB1  (ALARM)  ◄──────┼──────────────┼─── PB1  (ALARM)         │
+│                         │                    │                          │
+│  GND           ───────┼──────────────┼─── GND                   │
+└──────────────────┘                    └───────────────────┘
+
+How to compile
+Master board:
+In dma_stepper_hal.h: #define CONTROLLER_MODE CONTROLLER_MODE_MASTER
+Upload via ST-Link
+Slave board:
+In dma_stepper_hal.h: #define CONTROLLER_MODE CONTROLLER_MODE_SLAVE
+Upload via ST-Link
+Both boards use identical wiring — only the CONTROLLER_MODE define differs.
