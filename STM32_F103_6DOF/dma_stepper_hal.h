@@ -3,16 +3,15 @@
 // Discord: https://discord.gg/ynHCkrsmMA
 // ============================================================================
 // CHANGELOG:
-// 2026-08-19: CRITICAL FIX: Replaced 'attribute((packed))' with '__attribute__((packed))'.
-//             Without double underscore, GCC ignores packing, causing size mismatch with C#.
-// 2026-08-18: Merged 6-axis SPI Master/Slave with advanced limit switch config.
+// 2026-08-19: Added COMMAND enum to make it visible in both .cpp and .ino files.
+// 2026-08-18: Merged 6-axis SPI Master/Slave support with advanced limit switch config.
 // ============================================================================
 #ifndef DMA_STEPPER_HAL_H
 #define DMA_STEPPER_HAL_H
 #include <Arduino.h>
 
 // =============================================================================
-// 🛠️ USER CONFIGURATION (MODIFY ONLY THESE VALUES FOR EACH BOARD)
+// 🛠️ USER CONFIGURATION (Modify only these values)
 // =============================================================================
 #define MM_PER_REV 8.0f
 #define STEPS_PER_REV 1600
@@ -69,9 +68,6 @@
 #define CONTROLLER_MODE_MASTER 0
 #define CONTROLLER_MODE_SLAVE 1
 
-// !!! ВАЖНО: Меняйте эту строку перед прошивкой каждой платы !!!
-// Для платы, подключенной к USB:  #define CONTROLLER_MODE CONTROLLER_MODE_MASTER
-// Для второй платы (Slave):       #define CONTROLLER_MODE CONTROLLER_MODE_SLAVE
 #ifndef CONTROLLER_MODE
 #define CONTROLLER_MODE CONTROLLER_MODE_MASTER
 #endif
@@ -106,6 +102,33 @@ typedef struct __attribute__((packed)) {
 
 #define SPI_FLAG_SYNC 0x01
 #define SPI_FLAG_ALARM 0x02
+
+// =============================================================================
+// PROTOCOL COMMANDS (Moved here so .cpp and .ino can both see them)
+// =============================================================================
+enum COMMAND : uint8_t {
+  CMD_HOME = 0,
+  CMD_MOVE = 1,
+  CMD_SET_SPEED = 2,
+  CMD_DISABLE = 3,
+  CMD_ENABLE = 4,
+  CMD_GET_STATE = 5,
+  CMD_CLEAR_ALARM = 6,
+  CMD_PARK = 7,
+  SET_ALARM = 8,
+  CMD_SET_LOW_SPEED = 9,
+  CMD_SET_ACCEL = 10,
+  CMD_MOVE_SH = 11,
+  CMD_SET_PID_KP = 0x0C,
+  CMD_SET_PID_KI = 0x0D,
+  CMD_SET_PID_KD = 0x0E,
+  CMD_SET_PID_KS = 0x0F,
+  CMD_SET_PID_ENABLE = 0x10,
+  CMD_SET_PID_BLEND = 0x11,
+  CMD_GET_PID_STATE = 0x12,
+  CMD_STORE_PID = 0x13,
+  CMD_RESTORE_PID = 0x14
+};
 
 // =============================================================================
 // UNIT CONVERSION MACROS
@@ -226,6 +249,7 @@ void DMAStepper_StartHoming(uint8_t axisIdx);
 
 void SPI_Controller_Init(void);
 void SPI_Controller_Process(void);
+void SPI_PingSlave(void); 
 bool SPI_Controller_SendCommand(uint8_t cmd, int32_t* data, bool sync);
 bool SPI_Controller_IsSlaveReady(void);
 void SPI_Controller_TriggerAlarm(void);

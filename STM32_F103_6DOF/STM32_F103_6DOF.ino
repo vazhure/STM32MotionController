@@ -15,13 +15,12 @@ PB0 (SYNC), PB1 (ALARM), GND (common ground required!)
 MASTER board: connect USB to PC/SimHub
 SLAVE board:  powered separately, no USB needed
 
-⚠️ IMPORTANT: 
+IMPORTANT: 
 To compile for Master, ensure dma_stepper_hal.h has: #define CONTROLLER_MODE CONTROLLER_MODE_MASTER
 To compile for Slave, ensure dma_stepper_hal.h has:  #define CONTROLLER_MODE CONTROLLER_MODE_SLAVE
-Do NOT define CONTROLLER_MODE in this .ino file.
 */
 
-// 2026-08-19: Merged 6-axis SPI Master/Slave with advanced limit switch config.
+// 2026-08-19: Moved COMMAND enum to dma_stepper_hal.h to fix compilation scope errors.
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
 // Discord: https://discord.gg/ynHCkrsmMA
@@ -52,31 +51,8 @@ Do NOT define CONTROLLER_MODE in this .ino file.
 #define STATE_SIZE 20
 #define PID_STATE_SIZE 20
 
-enum COMMAND : uint8_t {
-  CMD_HOME = 0,
-  CMD_MOVE = 1,
-  CMD_SET_SPEED = 2,
-  CMD_DISABLE = 3,
-  CMD_ENABLE = 4,
-  CMD_GET_STATE = 5,
-  CMD_CLEAR_ALARM = 6,
-  CMD_PARK = 7,
-  SET_ALARM = 8,
-  CMD_SET_LOW_SPEED = 9,
-  CMD_SET_ACCEL = 10,
-  CMD_MOVE_SH = 11,
-  CMD_SET_PID_KP = 0x0C,
-  CMD_SET_PID_KI = 0x0D,
-  CMD_SET_PID_KD = 0x0E,
-  CMD_SET_PID_KS = 0x0F,
-  CMD_SET_PID_ENABLE = 0x10,
-  CMD_SET_PID_BLEND = 0x11,
-  CMD_GET_PID_STATE = 0x12,
-  CMD_STORE_PID = 0x13,
-  CMD_RESTORE_PID = 0x14
-};
+// enum COMMAND удален отсюда, так как теперь он объявлен в dma_stepper_hal.h
 
-// 2026-08-19 FIX: Double underscore for packed attribute
 struct __attribute__((packed)) PCCMD {
   uint8_t header;
   uint8_t len;
@@ -149,7 +125,7 @@ bool loadPidFromEEPROM() {
 void sendAllStates() {
   for (int logicalAxis = 0; logicalAxis < AXES_TOTAL; logicalAxis++) {
     STATE s;
-    memset(&s, 0, sizeof(s));  // 2026-08-19 FIX: Zero-init to avoid garbage
+    memset(&s, 0, sizeof(s));
 
 #if (CONTROLLER_MODE == CONTROLLER_MODE_MASTER)
     if (logicalAxis < AXES_PER_BOARD) {
@@ -163,13 +139,15 @@ void sendAllStates() {
       s.min = ax->minPos;
       s.max = ax->maxPos;
     } else {
+      // Remote axes 3-5 (from Slave via SPI)
       int slaveIdx = logicalAxis - AXES_PER_BOARD;
       SPI_FRAME* frame = SPI_Controller_GetLastFrame();
 
-      // 2026-08-19 FIX: Never use 'continue'. Send explicit "no data" state.
+      // 2026-08-19 CRITICAL FIX: NEVER skip axes — always send something.
+      // If Slave is offline/in alarm, send explicit "no data" state with flag 0x08.
       if (!frame) {
         s.mode = 0;      // MODE_UNKNOWN
-        s.flags = 0x08;  // Special flag for C#: "no data from slave"
+        s.flags = 0x08;  // Special flag: "no data from slave"
         s.speedMMperSEC = 0;
         s.currentpos = 0;
         s.targetpos = 0;
@@ -178,12 +156,13 @@ void sendAllStates() {
       } else {
         s.mode = frame->modes[slaveIdx];
         s.flags = (frame->slaveStatus & (1 << slaveIdx)) ? 0x02 : 0;
-        if (frame->slaveStatus & 0x08) s.flags |= 0x04;
+        if (frame->slaveStatus & 0x08) s.flags |= 0x04;  // Alarm flag
         s.speedMMperSEC = 0;
         s.currentpos = frame->positions[slaveIdx];
         s.targetpos = frame->targets[slaveIdx];
-        s.min = 0;
-        s.max = 0;
+        AxisState* ax = DMAStepper_GetAxis(slaveIdx);
+        s.min = ax->minPos;
+        s.max = ax->maxPos;
       }
     }
 #else
@@ -349,6 +328,9 @@ void processCommand() {
       }
     case CMD_GET_STATE:
       {
+#if (CONTROLLER_MODE == CONTROLLER_MODE_MASTER)
+        SPI_Controller_SendCommand(CMD_GET_STATE, nullptr, false);
+#endif
         sendAllStates();
         break;
       }
@@ -465,7 +447,6 @@ inline void serialEvent() {
       }
     } else {
       if (byte == CMD_ID) {
-        // 2026-08-19 FIX: Compare with RAW_DATA_LEN constant, not uninitialized pccmd.len
         int nextByte = Serial.peek();
         if (nextByte == RAW_DATA_LEN) {
           rxBuffer[rxOffset++] = CMD_ID;
