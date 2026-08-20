@@ -520,7 +520,8 @@ void SPI_Controller_Init(void) {
   SPI.begin();
   // Обязательный фикс бага ядра для Master
   pinMode(SPI_MISO_PIN, INPUT);
-  SPI.setClockDivider(SPI_CLOCK_DIV128);  // Надежная скорость 562 кГц
+  SPI.setClockDivider(SPI_CLOCK_DIV256); // 280 кГц
+  //SPI.setClockDivider(SPI_CLOCK_DIV128);  // Надежная скорость 562 кГц 
   SPI.setBitOrder(MSBFIRST);
   SPI.setDataMode(SPI_MODE0);
 
@@ -536,8 +537,12 @@ void SPI_Controller_Init(void) {
 
   // ЖЕСТКАЯ НАСТРОЙКА ПИНОВ ДЛЯ SPI SLAVE
   gpio_set_mode(GPIOA, 4, GPIO_INPUT_PD);        // PA4 (NSS) -> Вход
-  gpio_set_mode(GPIOA, 5, GPIO_INPUT_FLOATING);  // PA5 (SCK) -> Вход для внешних тактов
-  gpio_set_mode(GPIOA, 7, GPIO_INPUT_FLOATING);  // PA7 (MOSI) -> Вход для внешних данных
+  //gpio_set_mode(GPIOA, 5, GPIO_INPUT_FLOATING);  // PA5 (SCK) -> Вход для внешних тактов
+  //gpio_set_mode(GPIOA, 7, GPIO_INPUT_FLOATING);  // PA7 (MOSI) -> Вход для внешних данных
+
+  gpio_set_mode(GPIOA, 5, GPIO_INPUT_PD);  // PA5 (SCK) - Подтягка убивает ложные такты от наводки
+  gpio_set_mode(GPIOA, 7, GPIO_INPUT_PD);  // PA7 (MOSI)
+
   gpio_set_mode(GPIOA, 6, GPIO_AF_OUTPUT_PP);    // PA6 (MISO) -> Выход альтернативной функции
 
   // НАСТРОЙКА РЕГИСТРОВ SPI1
@@ -626,6 +631,7 @@ void SPI_Controller_Process(void) {}
 // ========================================================================
 // SLAVE MODE: INTERRUPT HANDLERS
 // ========================================================================
+volatile int32_t targetPosition = 0;
 
 void prepareNextSlaveFrame() {
   spiTxBuf.header = SPI_HEADER_MAGIC;  // Отвечаем тем же магическим числом, но со своими данными
@@ -633,7 +639,8 @@ void prepareNextSlaveFrame() {
   spiTxBuf.slaveStatus = 0;
   for (int i = 0; i < NUM_AXES; i++) {
     spiTxBuf.positions[i] = axisState[i].currentPosition;
-    spiTxBuf.targets[i] = axisState[i].targetPosition;
+    targetPosition = axisState[i].targetPosition;
+    spiTxBuf.targets[i] = targetPosition;
     spiTxBuf.modes[i] = axisState[i].mode;
     if (axisState[i].homed) spiTxBuf.slaveStatus |= (1 << i);
     if (axisState[i].mode == MODE_ALARM) spiTxBuf.slaveStatus |= 0x08;
@@ -730,7 +737,7 @@ extern "C" void __irq_spi1(void) {
   if (sr & SPI_SR_OVR) {
     volatile uint8_t dummy = SPI1->regs->DR;
     (void)dummy;
-    prepareNextSlaveFrame();
+    //prepareNextSlaveFrame();
   }
 }
 
