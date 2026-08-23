@@ -20,6 +20,7 @@ To compile for Master, ensure dma_stepper_hal.h has: #define CONTROLLER_MODE CON
 To compile for Slave, ensure dma_stepper_hal.h has:  #define CONTROLLER_MODE CONTROLLER_MODE_SLAVE
 */
 
+// 2026-08-23 CRITICAL FIX: Disable JTAG to free PB3, PB4, PA15 for GPIO use.
 // 2026-08-19: Moved COMMAND enum to dma_stepper_hal.h to fix compilation scope errors.
 // 3DOF by Andrey Zhuravlev
 // v.azhure@gmail.com
@@ -225,8 +226,8 @@ void processCommand() {
             if (ax->mode == MODE_PARKED) ax->mode = MODE_UNPARKING;
           }
         }
-        int32_t slaveData[3];
-        for (int i = 0; i < 3; i++) {
+        int32_t slaveData[AXES_PER_BOARD];
+        for (int i = 0; i < AXES_PER_BOARD; i++) {
           uint16_t val = pccmd_sh.data[AXES_PER_BOARD + i];
           val = (val >> 8) | (val << 8);
           AxisState* refAx = DMAStepper_GetAxis(0);
@@ -294,6 +295,8 @@ void processCommand() {
         for (int i = 0; i < AXES_PER_BOARD; i++) {
           AxisState* ax = DMAStepper_GetAxis(i);
           if (!ax) continue;
+          // 2026-08-21 FIX: Игнорируем команду, если гоминг уже идет
+          if (ax->mode == MODE_HOMING) continue;
           if (ax->homed && (ax->mode == MODE_READY || ax->mode == MODE_PARKED)) continue;
           DMAStepper_StartHoming(i);
         }
@@ -323,6 +326,7 @@ void processCommand() {
             ax->homed = false;
           }
         }
+        SPI_Controller_SendCommand(SET_ALARM, nullptr, false);
 #endif
         break;
       }
@@ -402,7 +406,17 @@ void processCommand() {
 }
 
 void setup() {
-  for (int pin = PA0; pin <= PC15; pin++) pinMode(pin, INPUT_PULLDOWN);
+  // 2026-08-23 CRITICAL FIX: Disable JTAG to free PB3, PB4, PA15 for GPIO use.
+  // Keep only SWD (PA13/PA14) for debugging/flashing via ST-Link.
+  // Without this, PB3 (JTDO) and PB4 (NJTRST) are locked by JTAG and 
+  // pinMode() calls silently fail — no STEP/DIR signals on Axis 2!
+  afio_cfg_debug_ports(AFIO_DEBUG_SW_ONLY);
+
+  // ВАЖНО: исключаем из цикла защищённые пины (PA13, PA14 — SWD)
+  for (int pin = PA0; pin <= PC15; pin++) {
+    if (pin == PA13 || pin == PA14) continue;  // Не трогаем SWD!
+    pinMode(pin, INPUT_PULLDOWN);
+  }
   pinMode(LED_PIN, OUTPUT);
 
   loadPidFromEEPROM();

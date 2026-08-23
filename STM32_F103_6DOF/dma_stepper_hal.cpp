@@ -395,8 +395,8 @@ void DMAStepper_Process(void) {
               int32_t centerPos = (ax->minPos + ax->maxPos) / 2;
               if (abs(ax->currentPosition - centerPos) <= HOMING_CENTER_TOLERANCE) {
                 DMAStepper_StopAxis(i);
-                ax->mode = MODE_READY;
                 ax->homed = true;
+                ax->mode = MODE_READY;
                 axisHomeState[i] = H_DONE;
                 ax->limitedFreq = 0;
                 ax->accelLastTime = millis();
@@ -520,8 +520,8 @@ void SPI_Controller_Init(void) {
   SPI.begin();
   // Обязательный фикс бага ядра для Master
   pinMode(SPI_MISO_PIN, INPUT);
-  SPI.setClockDivider(SPI_CLOCK_DIV256); // 280 кГц
-  //SPI.setClockDivider(SPI_CLOCK_DIV128);  // Надежная скорость 562 кГц 
+  SPI.setClockDivider(SPI_CLOCK_DIV256);  // 280 кГц
+  //SPI.setClockDivider(SPI_CLOCK_DIV128);  // Надежная скорость 562 кГц
   SPI.setBitOrder(MSBFIRST);
   SPI.setDataMode(SPI_MODE0);
 
@@ -536,14 +536,14 @@ void SPI_Controller_Init(void) {
   SPI.begin();  // Базовая инициализация библиотеки
 
   // ЖЕСТКАЯ НАСТРОЙКА ПИНОВ ДЛЯ SPI SLAVE
-  gpio_set_mode(GPIOA, 4, GPIO_INPUT_PD);        // PA4 (NSS) -> Вход
+  gpio_set_mode(GPIOA, 4, GPIO_INPUT_PD);  // PA4 (NSS) -> Вход
   //gpio_set_mode(GPIOA, 5, GPIO_INPUT_FLOATING);  // PA5 (SCK) -> Вход для внешних тактов
   //gpio_set_mode(GPIOA, 7, GPIO_INPUT_FLOATING);  // PA7 (MOSI) -> Вход для внешних данных
 
   gpio_set_mode(GPIOA, 5, GPIO_INPUT_PD);  // PA5 (SCK) - Подтягка убивает ложные такты от наводки
   gpio_set_mode(GPIOA, 7, GPIO_INPUT_PD);  // PA7 (MOSI)
 
-  gpio_set_mode(GPIOA, 6, GPIO_AF_OUTPUT_PP);    // PA6 (MISO) -> Выход альтернативной функции
+  gpio_set_mode(GPIOA, 6, GPIO_AF_OUTPUT_PP);  // PA6 (MISO) -> Выход альтернативной функции
 
   // НАСТРОЙКА РЕГИСТРОВ SPI1
   SPI1->regs->CR1 &= ~(SPI_CR1_SPE);
@@ -628,19 +628,20 @@ SPI_FRAME* SPI_Controller_GetLastFrame(void) {
 void SPI_Controller_Process(void) {}
 
 #else
-// ========================================================================
+// =============================================================================
 // SLAVE MODE: INTERRUPT HANDLERS
-// ========================================================================
-volatile int32_t targetPosition = 0;
+// =============================================================================
+
+// Новый флаг — вместо обработки в ISR просто отмечаем наличие кадра
+static volatile bool spiCommandPending = false;
 
 void prepareNextSlaveFrame() {
-  spiTxBuf.header = SPI_HEADER_MAGIC;  // Отвечаем тем же магическим числом, но со своими данными
+  spiTxBuf.header = SPI_HEADER_MAGIC;
   spiTxBuf.frameId = slaveFrameIdCounter++;
   spiTxBuf.slaveStatus = 0;
   for (int i = 0; i < NUM_AXES; i++) {
     spiTxBuf.positions[i] = axisState[i].currentPosition;
-    targetPosition = axisState[i].targetPosition;
-    spiTxBuf.targets[i] = targetPosition;
+    spiTxBuf.targets[i] = axisState[i].targetPosition;
     spiTxBuf.modes[i] = axisState[i].mode;
     if (axisState[i].homed) spiTxBuf.slaveStatus |= (1 << i);
     if (axisState[i].mode == MODE_ALARM) spiTxBuf.slaveStatus |= 0x08;
@@ -663,7 +664,7 @@ void spiNSS_Falling_ISR() {
   spiIndex = 0;
 }
 
-// Аппаратное прерывание SPI1
+// Аппаратное прерывание SPI1 — ТОЛЬКО приём/передача байтов, без логики
 extern "C" void __irq_spi1(void) {
   uint32_t sr = SPI1->regs->SR;
 
@@ -677,57 +678,9 @@ extern "C" void __irq_spi1(void) {
       if (spiIndex < sizeof(SPI_FRAME)) {
         SPI1->regs->DR = spiTxPtr[spiIndex];
       } else {
-        // Кадр полностью принят
+        // Кадр полностью принят — только ставим флаг, НЕ обрабатываем здесь
         if (spiRxBuf.header == SPI_HEADER_MAGIC && spiRxBuf.frameId != (slaveFrameIdCounter - 1)) {
-          // Обработка команд (упрощенная для ISR, основные действия можно вынести,
-          // но для 44 байт это безопасно выполняется здесь)
-          switch (spiRxBuf.command) {
-            case 1:  // CMD_MOVE
-              for (int i = 0; i < NUM_AXES; i++) {
-                AxisState* ax = &axisState[i];
-                if (ax->homed && ax->mode == MODE_READY) DMAStepper_SetTarget(i, spiRxBuf.cmdData[i]);
-                else if (ax->mode == MODE_PARKED || ax->mode == MODE_UNPARKING) {
-                  ax->pendingTarget = spiRxBuf.cmdData[i];
-                  if (ax->mode == MODE_PARKED) ax->mode = MODE_UNPARKING;
-                }
-              }
-              break;
-            case 0:  // CMD_HOME
-              for (int i = 0; i < NUM_AXES; i++) {
-                AxisState* ax = &axisState[i];
-                if (!ax) continue;
-                if (ax->homed && (ax->mode == MODE_READY || ax->mode == MODE_PARKED)) continue;
-                DMAStepper_StartHoming(i);
-              }
-              break;
-            case 2:  // CMD_SET_SPEED
-              for (int i = 0; i < NUM_AXES; i++) DMAStepper_SetMaxSpeed(i, (uint32_t)spiRxBuf.cmdData[0]);
-              break;
-            case 3:  // CMD_DISABLE
-              DMAStepper_StopAll();
-              for (int i = 0; i < NUM_AXES; i++) axisState[i].mode = MODE_DISABLED;
-              break;
-            case 4:  // CMD_ENABLE
-              for (int i = 0; i < NUM_AXES; i++) axisState[i].mode = axisState[i].homed ? MODE_READY : MODE_CONNECTED;
-              break;
-            case 6:  // CMD_CLEAR_ALARM
-              DMAStepper_ClearAlarm();
-              break;
-            case 7:  // CMD_PARK
-              for (int i = 0; i < NUM_AXES; i++)
-                if (axisState[i].homed) axisState[i].mode = MODE_PARKING;
-              break;
-            case 10:  // CMD_SET_ACCEL
-              for (int i = 0; i < NUM_AXES; i++) axisState[i].maxAccel = spiRxBuf.cmdData[0];
-              break;
-          }
-
-          if (spiRxBuf.flags & SPI_FLAG_SYNC) {
-            uint32_t syncStart = millis();
-            while (digitalRead(SYNC_PIN) == LOW) {
-              if (millis() - syncStart > 100) break;
-            }
-          }
+          spiCommandPending = true;
         }
         prepareNextSlaveFrame();
       }
@@ -737,12 +690,90 @@ extern "C" void __irq_spi1(void) {
   if (sr & SPI_SR_OVR) {
     volatile uint8_t dummy = SPI1->regs->DR;
     (void)dummy;
-    //prepareNextSlaveFrame();
   }
 }
 
-void SPI_Controller_Process(void) { /* Handled entirely by ISR */
+// ============================================================================
+// ОБРАБОТКА КОМАНД — теперь в основном цикле, без гонок с Process()
+// ============================================================================
+static void processSlaveCommand(const SPI_FRAME* frame) {
+  switch (frame->command) {
+    case 1:  // CMD_MOVE
+      for (int i = 0; i < NUM_AXES; i++) {
+        AxisState* ax = &axisState[i];
+        if (ax->homed && ax->mode == MODE_READY) {
+          DMAStepper_SetTarget(i, frame->cmdData[i]);
+        } else if (ax->mode == MODE_PARKED || ax->mode == MODE_UNPARKING) {
+          ax->pendingTarget = frame->cmdData[i];
+          if (ax->mode == MODE_PARKED) ax->mode = MODE_UNPARKING;
+        }
+      }
+      break;
+
+    case 0:  // CMD_HOME
+      for (int i = 0; i < NUM_AXES; i++) {
+        AxisState* ax = &axisState[i];
+        if (ax->mode == MODE_HOMING) continue;
+        if (ax->homed && (ax->mode == MODE_READY || ax->mode == MODE_PARKED)) continue;
+        DMAStepper_StartHoming(i);
+      }
+      break;
+
+    case 2:  // CMD_SET_SPEED
+      for (int i = 0; i < NUM_AXES; i++) DMAStepper_SetMaxSpeed(i, (uint32_t)frame->cmdData[0]);
+      break;
+
+    case 3:  // CMD_DISABLE
+      DMAStepper_StopAll();
+      for (int i = 0; i < NUM_AXES; i++) axisState[i].mode = MODE_DISABLED;
+      break;
+
+    case 4:  // CMD_ENABLE
+      for (int i = 0; i < NUM_AXES; i++) axisState[i].mode = axisState[i].homed ? MODE_READY : MODE_CONNECTED;
+      break;
+
+    case 6:  // CMD_CLEAR_ALARM
+      DMAStepper_ClearAlarm();
+      break;
+
+    case 7:  // CMD_PARK
+      for (int i = 0; i < NUM_AXES; i++)
+        if (axisState[i].homed) axisState[i].mode = MODE_PARKING;
+      break;
+
+    case 8:  // SET_ALARM
+      DMAStepper_StopAll();
+      for (int i = 0; i < NUM_AXES; i++) {
+        axisState[i].mode = MODE_ALARM;
+        axisState[i].homed = false;
+      }
+      break;
+
+    case 10:  // CMD_SET_ACCEL
+      for (int i = 0; i < NUM_AXES; i++) axisState[i].maxAccel = frame->cmdData[0];
+      break;
+  }
+
+  // Обработка SYNC-флага — теперь безопасно, мы не в ISR
+  if (frame->flags & SPI_FLAG_SYNC) {
+    uint32_t syncStart = millis();
+    while (digitalRead(SYNC_PIN) == LOW) {
+      if (millis() - syncStart > 100) break;
+    }
+  }
 }
+
+void SPI_Controller_Process(void) {
+  if (!spiCommandPending) return;
+  spiCommandPending = false;
+
+  // Локальная копия — защита от одновременной записи в буфер при следующем кадре
+  SPI_FRAME localFrame;
+  memcpy(&localFrame, (const SPI_FRAME*)&spiRxBuf, sizeof(SPI_FRAME));
+
+  processSlaveCommand(&localFrame);
+}
+
 bool SPI_Controller_SendCommand(uint8_t cmd, int32_t* data, bool sync) {
   return false;
 }
