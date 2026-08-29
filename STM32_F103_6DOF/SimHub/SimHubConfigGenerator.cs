@@ -108,7 +108,7 @@ namespace SimHubConfigGenerator
         ],
         ""UpdateCommands"": [
           {{
-            ""Command"": ""<0x00><0x1C><0x01><0x00><Axis1><Axis2><Axis3><Axis4><Axis5><Axis6>"",
+            ""Command"": ""<0x00><0x1C><0x0B><0x00><Axis1><Axis2><Axis3><Axis4><Axis5><Axis6>"",
             ""CommandDelay"": 10
           }}
         ],
