@@ -1,0 +1,161 @@
+{
+  "Geometry": {
+    "Axis": [],
+    "TypeName": "GenericGeometry6DofsRotary",
+    "BaseGeometry": {
+      "ReviewManager": {
+        "AvailableReviewKeys": "Dimensions",
+        "BypassReviewKeys": []
+      },
+      "Settings": {
+        "RodLength": 650.0,
+        "CrankLength": 160.0,
+        "CrankCenterAngle": 28.0,
+        "RotaryAngularRange": 85.0,
+        "ActuatorsSpikeFilterDegreesPerSecond": 25.0,
+        "ActuatorsLinearSpeedLimitMmPerSecond": 250.0,
+        "ActuatorSafetyRangePercent": 10.0,
+        "ActuatorSafetyRangePredictionPercent": 5.0,
+        "SingularityLimit": 10.0,
+        "AxisLimitingSettings": {
+          "Limits": [
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 1,
+              "LimitDirection": 2,
+              "UseDynamicScaler": false
+            },
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 1,
+              "LimitDirection": 1,
+              "UseDynamicScaler": false
+            },
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 2,
+              "LimitDirection": 0,
+              "UseDynamicScaler": false
+            },
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 0,
+              "LimitDirection": 0,
+              "UseDynamicScaler": false
+            },
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 3,
+              "LimitDirection": 0,
+              "UseDynamicScaler": false
+            },
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 5,
+              "LimitDirection": 0,
+              "UseDynamicScaler": false
+            },
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 4,
+              "LimitDirection": 2,
+              "UseDynamicScaler": false
+            },
+            {
+              "Enabled": false,
+              "Limit": 50.0,
+              "MotionAxis": 4,
+              "LimitDirection": 1,
+              "UseDynamicScaler": false
+            }
+          ]
+        },
+        "CenterOfRotationOffset": {},
+        "MotorsSpacing": 350.0,
+        "MotorToMotorLinksSpacing": 350.0,
+        "TopMotorToMotorLinksSpacing": 40.0,
+        "TopLinksSpacing": 350.0,
+        "IsLoading": false,
+        "SeatZOffset": 0.0,
+        "SeatYOffset": 0.0,
+        "MotionCompensationSettings": {
+          "SeatToPivotHeightMm": 0.0
+        },
+        "Motors": [
+          {
+            "MotorRotation": 30.0,
+            "CrankRotationRange": 85.0,
+            "CrankLength": 160.0,
+            "ReverseCrankDirection": false,
+            "CrankDefaultRotation": 28.0,
+            "RodLength": 650.0,
+            "Index": 0,
+            "DistanceToHitBoxSigned": 0.0
+          },
+          {
+            "MotorRotation": 30.0,
+            "CrankRotationRange": 85.0,
+            "CrankLength": 160.0,
+            "ReverseCrankDirection": true,
+            "CrankDefaultRotation": 28.0,
+            "RodLength": 650.0,
+            "Index": 1,
+            "DistanceToHitBoxSigned": 0.0
+          },
+          {
+            "MotorRotation": 270.0,
+            "CrankRotationRange": 85.0,
+            "CrankLength": 160.0,
+            "ReverseCrankDirection": false,
+            "CrankDefaultRotation": 28.0,
+            "RodLength": 650.0,
+            "Index": 2,
+            "DistanceToHitBoxSigned": 0.0
+          },
+          {
+            "MotorRotation": 270.0,
+            "CrankRotationRange": 85.0,
+            "CrankLength": 160.0,
+            "ReverseCrankDirection": true,
+            "CrankDefaultRotation": 28.0,
+            "RodLength": 650.0,
+            "Index": 3,
+            "DistanceToHitBoxSigned": 0.0
+          },
+          {
+            "MotorRotation": 150.0,
+            "CrankRotationRange": 85.0,
+            "CrankLength": 160.0,
+            "ReverseCrankDirection": false,
+            "CrankDefaultRotation": 28.0,
+            "RodLength": 650.0,
+            "Index": 4,
+            "DistanceToHitBoxSigned": 0.0
+          },
+          {
+            "MotorRotation": 150.0,
+            "CrankRotationRange": 85.0,
+            "CrankLength": 160.0,
+            "ReverseCrankDirection": true,
+            "CrankDefaultRotation": 28.0,
+            "RodLength": 650.0,
+            "Index": 5,
+            "DistanceToHitBoxSigned": 0.0
+          }
+        ],
+        "LastAcceptedInput": null,
+        "PresetSource": null,
+        "Version": 0
+      },
+      "TypeName": "Geometry6DOFsStewartRotary"
+    }
+  },
+  "SecondaryGeometry": null
+}
