@@ -169,7 +169,7 @@
           "Settings": {
             "EnableDataLogging": false,
             "RtsEnable": true,
-            "DtrEnable": false,
+            "DtrEnable": true,
             "LockSettings": false,
             "SerialPort": "COM13",
             "DataBits": 8,
