@@ -31,28 +31,28 @@
         "AxisLimitingSettings": {
           "Limits": [
             {
-              "Enabled": true,
+              "Enabled": false,
               "Limit": 25.0,
               "MotionAxis": 1,
               "LimitDirection": 2,
               "UseDynamicScaler": false
             },
             {
-              "Enabled": true,
+              "Enabled": false,
               "Limit": 25.0,
               "MotionAxis": 1,
               "LimitDirection": 1,
               "UseDynamicScaler": false
             },
             {
-              "Enabled": true,
+              "Enabled": false,
               "Limit": 25.0,
               "MotionAxis": 2,
               "LimitDirection": 0,
               "UseDynamicScaler": false
             },
             {
-              "Enabled": true,
+              "Enabled": false,
               "Limit": 50.0,
               "MotionAxis": 0,
               "LimitDirection": 0,
@@ -193,21 +193,28 @@
                   "WaitForMessage": null,
                   "WaitForDelay": 5000,
                   "Command": "<0x00><0x1C><0x02><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00>",
-                  "CommandDelay": 30
+                  "CommandDelay": 100
                 },
                 {
                   "MustWaitForMessage": false,
                   "WaitForMessage": null,
                   "WaitForDelay": 5000,
                   "Command": "<0x00><0x1C><0x0A><0x00><0x98><0x3A><0x00><0x00><0x98><0x3A><0x00><0x00><0x98><0x3A><0x00><0x00><0x98><0x3A><0x00><0x00><0x98><0x3A><0x00><0x00><0x98><0x3A><0x00><0x00>",
-                  "CommandDelay": 30
+                  "CommandDelay": 100
                 },
                 {
                   "MustWaitForMessage": false,
                   "WaitForMessage": null,
                   "WaitForDelay": 5000,
-                  "Command": "<0x00><0x1C><0x02><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00><0xFA><0x00><0x00><0x00>",
+                  "Command": "<0x00><0x1C><0x04><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00>",
                   "CommandDelay": 3000
+                },
+                {
+                  "MustWaitForMessage": false,
+                  "WaitForMessage": null,
+                  "WaitForDelay": 5000,
+                  "Command": "<0x00><0x1C><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00><0x01><0x00><0x00><0x00>",
+                  "CommandDelay": 100
                 }
               ],
               "UpdateCommands": [
