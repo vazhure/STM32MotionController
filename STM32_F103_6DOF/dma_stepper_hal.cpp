@@ -301,13 +301,35 @@ static float computePID(AxisState* ax, uint32_t currentTime) {
 static uint32_t applyAccelLimit(AxisState* ax, uint32_t desiredFreq) {
   uint32_t now = millis();
   uint32_t dt = now - ax->accelLastTime;
+
+  // CRITICAL: Clamp dt to avoid huge jumps after pauses, direction changes,
+  // or when axis was idle for a while. Without this, a 100ms pause would
+  // allow maxDelta = 50000*100/1000 = 5000 Hz jump → step loss.
   if (dt == 0) dt = 1;
+  if (dt > 10) dt = 10;  // Clamp to 10ms max
+
   ax->accelLastTime = now;
-  float maxDelta = (float)ax->maxAccel * dt / 1000.0f;
+
+  float maxDelta = (float)ax->maxAccel * (float)dt / 1000.0f;
+
+  // Additional safety: hard cap on per-call frequency change
+  // This prevents step loss even if accel is set very high
+  if (maxDelta > MAX_FREQ_DELTA_PER_CALL) maxDelta = MAX_FREQ_DELTA_PER_CALL;
+
   float delta = (float)desiredFreq - ax->limitedFreq;
-  if (fabs(delta) > maxDelta) ax->limitedFreq += (delta > 0) ? maxDelta : -maxDelta;
-  else ax->limitedFreq = (float)desiredFreq;
-  return (uint32_t)constrain((int32_t)ax->limitedFreq, MIN_FREQUENCY_HZ, (int32_t)ax->maxFreqHz);
+  if (fabs(delta) > maxDelta) {
+    ax->limitedFreq += (delta > 0) ? maxDelta : -maxDelta;
+  } else {
+    ax->limitedFreq = (float)desiredFreq;
+  }
+
+  // Never go below MIN_FREQUENCY_HZ when moving (except when stopping)
+  uint32_t result = (uint32_t)constrain(
+    (int32_t)ax->limitedFreq,
+    MIN_FREQUENCY_HZ,
+    (int32_t)ax->maxFreqHz);
+
+  return result;
 }
 
 void DMAStepper_ClearAlarm(void) {
@@ -424,7 +446,7 @@ void DMAStepper_Process(void) {
         if (abs(ax->currentPosition - ax->targetPosition) <= POSITION_TOLERANCE) {
           DMAStepper_StopAxis(i);
           ax->mode = MODE_PARKED;
-          ax->limitedFreq = 0;
+          ax->limitedFreq = 0;  // OK here — axis is stopped
           ax->accelLastTime = millis();
         } else if (!ax->stepping) {
           DMAStepper_SetFrequency(i, PARKING_FREQUENCY_HZ);
@@ -439,7 +461,8 @@ void DMAStepper_Process(void) {
           if (abs(ax->currentPosition - centerPos) <= HOMING_CENTER_TOLERANCE) {
             DMAStepper_StopAxis(i);
             ax->mode = MODE_READY;
-            ax->limitedFreq = 0;
+            // Start from MIN_FREQUENCY_HZ, not 0, for smooth transition
+            ax->limitedFreq = (float)MIN_FREQUENCY_HZ;
             ax->accelLastTime = millis();
             ax->pidLastTime = millis();
             if (ax->pendingTarget != PENDING_TARGET_NONE) {
@@ -477,7 +500,11 @@ void DMAStepper_Process(void) {
             } else if (ax->direction != forward) {
               DMAStepper_StopAxis(i);
               delayMicroseconds(DIRECTION_CHANGE_DELAY_US);
-              ax->limitedFreq = 0;
+              // Don't reset to 0 — start from MIN_FREQUENCY_HZ for smooth restart.
+              // Resetting to 0 causes the next applyAccelLimit call to see a huge
+              // delta and potentially jump frequency too fast.
+              ax->limitedFreq = (float)MIN_FREQUENCY_HZ;
+              ax->accelLastTime = millis();  // Reset timer to avoid dt spike
               if (ax->pidEnabled) {
                 ax->integral = 0;
                 ax->prevError = (float)error;
@@ -729,7 +756,13 @@ static void processSlaveCommand(const SPI_FRAME* frame) {
       break;
 
     case 4:  // CMD_ENABLE
-      for (int i = 0; i < NUM_AXES; i++) axisState[i].mode = axisState[i].homed ? MODE_READY : MODE_CONNECTED;
+      for (int i = 0; i < NUM_AXES; i++) {
+        AxisState* ax = &axisState[i];
+        // fix: don't override PARKED/HOMING/ALARM
+        if (ax->mode == MODE_CONNECTED || ax->mode == MODE_DISABLED || ax->mode == MODE_UNKNOWN) {
+          ax->mode = ax->homed ? MODE_READY : MODE_CONNECTED;
+        }
+      }
       break;
 
     case 6:  // CMD_CLEAR_ALARM

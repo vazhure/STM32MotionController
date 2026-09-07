@@ -3,6 +3,7 @@
 // Discord: https://discord.gg/ynHCkrsmMA
 // ============================================================================
 // CHANGELOG:
+// 2026-09-07: Acceleration fix. CMD_ENABLE fix (preserve PARKED state)
 // 2026-08-19: Added COMMAND enum to make it visible in both .cpp and .ino files.
 // 2026-08-18: Merged 6-axis SPI Master/Slave support with advanced limit switch config.
 // ============================================================================
@@ -60,6 +61,11 @@
 #define END_CLEARANCE_STEPS ((int32_t)(END_CLEARANCE_MM * (float)STEPS_PER_REV / (float)MM_PER_REV))
 
 // =============================================================================
+// ENABLE SWITCH  CONFIGURATION
+// =============================================================================
+#define ENABLE_PIN PB11 // PB12, PB6, PB7, PB8, PB9  // NC button: LOW = running, HIGH = paused
+
+// =============================================================================
 // MULTI-CONTROLLER CONFIGURATION
 // =============================================================================
 #define AXES_PER_BOARD 3
@@ -69,7 +75,7 @@
 #define CONTROLLER_MODE_SLAVE 1
 
 #ifndef CONTROLLER_MODE
-#define CONTROLLER_MODE CONTROLLER_MODE_MASTER
+#define CONTROLLER_MODE CONTROLLER_MODE_SLAVE
 #endif
 
 #if (CONTROLLER_MODE == CONTROLLER_MODE_SLAVE)
@@ -127,7 +133,7 @@ enum COMMAND : uint8_t {
   CMD_SET_PID_BLEND = 0x11,
   CMD_GET_PID_STATE = 0x12,
   CMD_STORE_PID = 0x13,
-  CMD_RESTORE_PID = 0x14
+  CMD_RESTORE_PID = 0x14,
 };
 
 // =============================================================================
@@ -152,8 +158,14 @@ enum COMMAND : uint8_t {
 #define HOMING_TRAVEL_LIMIT_MULT 1.5f
 #define HOMING_OVERFLOW_LIMIT_MULT 1.4f
 #define POSITION_TOLERANCE 50
-#define POSITION_DEADZONE 2
-#define ACCEL_RAMP_DISTANCE 50
+
+#define POSITION_DEADZONE 4 //2
+#define ACCEL_RAMP_DISTANCE 800 //50
+
+// S-curve softening: limit how fast frequency can change per call
+// This prevents "frequency shock" when target changes abruptly
+#define MAX_FREQ_DELTA_PER_CALL 2000 
+
 #define DIRECTION_CHANGE_DELAY_US 10
 #define HOMING_CENTER_TOLERANCE 100
 #define HOMING_RETRACT_SETTLE_MS 50

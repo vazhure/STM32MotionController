@@ -20,6 +20,7 @@ To compile for Master, ensure dma_stepper_hal.h has: #define CONTROLLER_MODE CON
 To compile for Slave, ensure dma_stepper_hal.h has:  #define CONTROLLER_MODE CONTROLLER_MODE_SLAVE
 */
 
+// 2026-09-07: Acceleration fix. CMD_ENABLE fix (preserve PARKED state)
 // 2026-08-23 CRITICAL FIX: Disable JTAG to free PB3, PB4, PA15 for GPIO use.
 // 2026-08-19: Moved COMMAND enum to dma_stepper_hal.h to fix compilation scope errors.
 // 3DOF by Andrey Zhuravlev
@@ -263,7 +264,19 @@ void processCommand() {
 #if (CONTROLLER_MODE == CONTROLLER_MODE_MASTER)
         for (int i = 0; i < AXES_PER_BOARD; i++) {
           AxisState* ax = DMAStepper_GetAxis(i);
-          if (ax) ax->mode = ax->homed ? MODE_READY : MODE_CONNECTED;
+          if (!ax) continue;
+
+          // CRITICAL FIX: Only transition to READY from safe states.
+          // Do NOT override PARKED/PARKING/UNPARKING — the unpark logic
+          // must complete its smooth centering sequence first.
+          // Do NOT override HOMING — let it finish.
+          // Do NOT override ALARM — user must clear it explicitly.
+          if (ax->mode == MODE_CONNECTED || ax->mode == MODE_DISABLED || ax->mode == MODE_UNKNOWN) {
+            ax->mode = ax->homed ? MODE_READY : MODE_CONNECTED;
+          }
+          // PARKED stays PARKED → CMD_MOVE will trigger UNPARKING naturally
+          // HOMING stays HOMING → will transition to READY when done
+          // ALARM stays ALARM → user must press CLEAR_ALARM
         }
         SPI_Controller_SendCommand(CMD_ENABLE, nullptr, false);
 #endif
@@ -408,7 +421,7 @@ void processCommand() {
 void setup() {
   // 2026-08-23 CRITICAL FIX: Disable JTAG to free PB3, PB4, PA15 for GPIO use.
   // Keep only SWD (PA13/PA14) for debugging/flashing via ST-Link.
-  // Without this, PB3 (JTDO) and PB4 (NJTRST) are locked by JTAG and 
+  // Without this, PB3 (JTDO) and PB4 (NJTRST) are locked by JTAG and
   // pinMode() calls silently fail — no STEP/DIR signals on Axis 2!
   afio_cfg_debug_ports(AFIO_DEBUG_SW_ONLY);
 
